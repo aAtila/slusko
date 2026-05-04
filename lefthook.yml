@@ -1,0 +1,22 @@
+pre-commit:
+  parallel: true
+  commands:
+    web-format:
+      root: web
+      glob: "*.{js,jsx,ts,tsx,json,jsonc,css,md}"
+      exclude:
+        - "bun.lock"
+        - ".react-router/**"
+        - "build/**"
+        - "node_modules/**"
+      run: bun run prettier --write {staged_files}
+      stage_fixed: true
+
+    web-lint:
+      root: web
+      glob: "*.{js,jsx,ts,tsx}"
+      exclude:
+        - ".react-router/**"
+        - "build/**"
+        - "node_modules/**"
+      run: bun run oxlint {staged_files}

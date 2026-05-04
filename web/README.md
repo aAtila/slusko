@@ -1,87 +1,60 @@
-# Welcome to React Router!
+# Slusko Web App
 
-A modern, production-ready template for building full-stack React applications using React Router.
+React Router v7 web application for Slusko.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## Prerequisites
 
-## Features
+- Node.js 22.x (matches `web/Dockerfile`)
+- Bun 1.3.9
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+## One-time setup
 
-## Getting Started
-
-### Installation
-
-Install the dependencies:
+1. Install Lefthook (choose one):
 
 ```bash
-npm install
+# Homebrew
+brew install lefthook
+
+# mise
+mise use -g lefthook@latest
 ```
 
-### Development
-
-Start the development server with HMR:
+2. From repo root, install git hooks:
 
 ```bash
-npm run dev
+lefthook install
 ```
 
-Your application will be available at `http://localhost:5173`.
-
-## Building for Production
-
-Create a production build:
+3. From `web/`, install dependencies:
 
 ```bash
-npm run build
+bun install
 ```
 
-## Deployment
+## Development
 
-### Docker Deployment
-
-To build and run using Docker:
+From `web/`:
 
 ```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
+bun run dev
 ```
 
-The containerized application can be deployed to any platform that supports Docker, including:
+## Quality checks
 
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
+From `web/`:
 
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
+```bash
+bun run format
+bun run format:check
+bun run lint
+bun run lint:fix
+bun run typecheck
+bun run check
 ```
 
-## Styling
+## Pre-commit behavior
 
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
+Repo-root Lefthook runs on staged `web/` files:
 
----
-
-Built with ❤️ using React Router.
+- Prettier `--write` (and restages changes)
+- oxlint gate (no autofix)
