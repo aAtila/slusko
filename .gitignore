@@ -56,3 +56,5 @@ coverage/
 *.pt
 *.onnx
 *.safetensors
+
+prompt-exports/

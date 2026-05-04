@@ -8,7 +8,12 @@
 Per Meeting we deal with several artifacts of very different sizes:
 
 - The uploaded original (MP3/M4A/WAV/MP4) — typically tens to hundreds of MB.
-- A normalized 16 kHz mono WAV that ffmpeg produces for Whisper — ~10× smaller.
+- A normalized 16 kHz mono WAV that ffmpeg produces for Whisper —
+  uncompressed PCM s16le mono @ 16 kHz, ~115 MB per hour
+  (32 KB/sec × 3600). For compressed source recordings (MP3/M4A/MP4) the
+  normalized WAV is often **larger** than the original; for raw/uncompressed
+  sources it is smaller. Storage planning should assume ~115 MB/hour for
+  `normalized.wav`.
 - The transcript (segments + timestamps + speaker labels) — KB-range.
 - The Summary (JSON) — KB-range.
 - Markdown / plain-text exports.
@@ -68,9 +73,11 @@ is a single storage-adapter swap, not a redesign.
 
 ## Consequences
 
-- A 90-minute meeting (~150 MB original MP4) ends up costing ~15 MB on disk
-  after normalization. Storage is dominated by `normalized.wav`, not the
-  original.
+- A 90-minute meeting normalizes to ~173 MB on disk regardless of source
+  format. For a 150 MB compressed MP4 source the normalized WAV is
+  slightly larger; for a raw WAV source it is smaller. Storage is
+  dominated by `normalized.wav` (the original is deleted after
+  normalization succeeds).
 - All audio path operations go through a single helper (e.g.
   `meetingDir(meetingId)`) so the layout convention is enforced in one
   place, not strewn across the codebase.
