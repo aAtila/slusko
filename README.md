@@ -18,6 +18,9 @@ docker compose up -d postgres
 # 2) Apply Drizzle migrations from the web service image
 docker compose run --rm web bun run db:migrate
 
+# Optional: add sample local-development meetings
+docker compose run --rm web bun run db:seed
+
 # 3) Start app services
 docker compose up web worker
 ```

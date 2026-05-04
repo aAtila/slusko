@@ -39,6 +39,7 @@ From `web/`:
 ```bash
 export DATABASE_URL=postgres://slusko:slusko@localhost:5432/slusko
 bun run db:migrate
+bun run db:seed # optional: load sample local-development meetings
 bun run dev
 ```
 
@@ -47,6 +48,7 @@ bun run dev
 ```bash
 docker compose up -d postgres
 docker compose run --rm web bun run db:migrate
+docker compose run --rm web bun run db:seed # optional sample meetings
 docker compose up web worker
 ```
 
@@ -57,6 +59,7 @@ Drizzle is the canonical schema/migration tool for the web app. From `web/`:
 ```bash
 bun run db:generate # generate SQL from app/db/schema.ts
 bun run db:migrate  # apply app/db/migrations to DATABASE_URL
+bun run db:seed     # upsert sample local-development meetings
 bun run db:studio   # inspect the database with Drizzle Studio
 ```
 
@@ -69,6 +72,7 @@ bun run format
 bun run format:check
 bun run lint
 bun run lint:fix
+bun run test
 bun run typecheck
 bun run check
 ```
