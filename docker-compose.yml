@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: slusko
+      POSTGRES_USER: slusko
+      POSTGRES_PASSWORD: slusko
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slusko -d slusko"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  web:
+    build:
+      context: ./web
+      target: dependencies
+    environment:
+      DATABASE_URL: postgres://slusko:slusko@postgres:5432/slusko
+      NODE_ENV: development
+    ports:
+      - "5173:5173"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+      - slusko_meetings:/data/meetings
+    command: bun run dev --host 0.0.0.0 --port 5173
+
+  worker:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgres://slusko:slusko@postgres:5432/slusko
+      MEETINGS_DIR: /data/meetings
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - slusko_meetings:/data/meetings
+      - slusko_models:/data/models
+
+volumes:
+  postgres_data:
+  slusko_meetings:
+  slusko_models:

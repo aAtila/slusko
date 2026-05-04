@@ -1,0 +1,1 @@
+"""Slusko worker scaffold."""
