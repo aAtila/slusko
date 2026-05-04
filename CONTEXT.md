@@ -141,8 +141,12 @@ the meeting page header, and the export header.
 - **Forms:** React Router's native `<Form>` + actions. No Formik, no RHF.
 - **File upload:** streamed multipart parsing (Busboy-style) — never
   buffer a 1 GB upload into memory.
-- **Linting / formatting:** **oxlint** (and the rest of the voidzero.dev
-  toolchain as it grows in.) No ESLint, no Prettier, no Biome.
+- **Linting:** **oxlint**. No ESLint, no Biome.
+- **Formatting:** **Prettier** today as a stopgap, with the explicit
+  intent to switch to **oxfmt** (the voidzero.dev formatter) once it
+  ships a stable 1.0. The voidzero toolchain is the long-term home;
+  Prettier is here because oxfmt is still pre-1.0 and PR-noise from
+  format churn isn't worth eating on an internal tool.
 - **Logging:** `pino` to stdout, JSON.
 - **Tests:** Vitest.
 
