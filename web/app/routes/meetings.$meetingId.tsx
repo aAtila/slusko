@@ -1,6 +1,15 @@
-import { useEffect } from "react";
-import { Link, useRevalidator } from "react-router";
+import { useEffect, useState } from "react";
+import {
+  data,
+  Form,
+  Link,
+  redirect,
+  useActionData,
+  useNavigation,
+  useRevalidator,
+} from "react-router";
 import type { MeetingStatus } from "~/db/schema";
+import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import {
   formatDuration,
   getMeetingStatusPresentation,
@@ -29,10 +38,34 @@ export async function loader({ params }: Route.LoaderArgs) {
   return loadMeetingDetailRouteData(params.meetingId);
 }
 
+export async function action({ params, request }: Route.ActionArgs) {
+  const { handleMeetingDetailAction } =
+    await import("~/lib/meeting-detail-action.server");
+  const result = await handleMeetingDetailAction({
+    formData: await request.formData(),
+    meetingId: params.meetingId,
+  });
+
+  if (result.type === "redirect") {
+    return redirect(result.to);
+  }
+
+  if (result.status) {
+    return data(result.data, { status: result.status });
+  }
+
+  return result.data;
+}
+
 export default function MeetingDetailPage({
   loaderData,
 }: Route.ComponentProps) {
   const { meeting } = loaderData;
+  const actionData = useActionData<MeetingActionData>();
+  const navigation = useNavigation();
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(meeting.title);
+  const [titleFeedback, setTitleFeedback] = useState<MeetingActionData>();
   const { revalidate } = useRevalidator();
   const presentation = getMeetingStatusPresentation({
     status: meeting.status,
@@ -51,6 +84,45 @@ export default function MeetingDetailPage({
     return () => window.clearInterval(intervalId);
   }, [meeting.status, revalidate]);
 
+  const submittingIntent = navigation.formData?.get("_intent");
+  const isDeleting =
+    navigation.state !== "idle" && submittingIntent === "delete-meeting";
+  const isUpdatingTitle =
+    navigation.state !== "idle" && submittingIntent === "update-title";
+  const formattedDuration =
+    meeting.durationSeconds === null
+      ? "Not available yet"
+      : formatDuration(meeting.durationSeconds);
+  const titleFeedbackId = "meeting-title-feedback";
+
+  useEffect(() => {
+    if (actionData?.intent !== "update-title") {
+      return;
+    }
+
+    setTitleFeedback(actionData);
+
+    if (actionData.ok) {
+      setTitleDraft(actionData.title);
+      setIsEditingTitle(false);
+      return;
+    }
+
+    setIsEditingTitle(true);
+  }, [actionData]);
+
+  const beginTitleEdit = () => {
+    setTitleDraft(meeting.title);
+    setTitleFeedback(undefined);
+    setIsEditingTitle(true);
+  };
+
+  const cancelTitleEdit = () => {
+    setTitleDraft(meeting.title);
+    setTitleFeedback(undefined);
+    setIsEditingTitle(false);
+  };
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <section className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-10 sm:px-8 lg:px-10">
@@ -65,15 +137,86 @@ export default function MeetingDetailPage({
           <p className="text-sm font-medium tracking-[0.3em] text-cyan-300 uppercase">
             Meeting detail
           </p>
-          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <h1 className="text-4xl font-semibold tracking-tight">
-              {meeting.title}
-            </h1>
+          <div className="mt-4 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 flex-1">
+              {isEditingTitle ? (
+                <Form className="space-y-3" method="post" preventScrollReset>
+                  <input name="_intent" type="hidden" value="update-title" />
+                  <label className="sr-only" htmlFor="meeting-title">
+                    Meeting title
+                  </label>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      aria-describedby={titleFeedbackId}
+                      aria-invalid={
+                        titleFeedback?.ok === false && isEditingTitle
+                          ? true
+                          : undefined
+                      }
+                      className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-3xl font-semibold tracking-tight text-white transition outline-none placeholder:text-slate-500 focus:border-cyan-200 focus:bg-white/[0.06] sm:text-4xl"
+                      disabled={isDeleting || isUpdatingTitle}
+                      id="meeting-title"
+                      maxLength={200}
+                      name="title"
+                      onChange={(event) => setTitleDraft(event.target.value)}
+                      required
+                      value={titleDraft}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        className="inline-flex items-center justify-center rounded-full bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isDeleting || isUpdatingTitle}
+                        type="submit"
+                      >
+                        {isUpdatingTitle ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isUpdatingTitle}
+                        onClick={cancelTitleEdit}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                  <TitleFeedback
+                    actionData={isEditingTitle ? titleFeedback : undefined}
+                    feedbackId={titleFeedbackId}
+                  />
+                </Form>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <h1 className="min-w-0 flex-1 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                      {meeting.title}
+                    </h1>
+                    <button
+                      className="inline-flex w-fit items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isDeleting || isUpdatingTitle}
+                      onClick={beginTitleEdit}
+                      type="button"
+                    >
+                      Edit title
+                    </button>
+                  </div>
+                  <TitleFeedback
+                    actionData={!isEditingTitle ? titleFeedback : undefined}
+                    feedbackId={titleFeedbackId}
+                  />
+                </div>
+              )}
+            </div>
             <StatusBadge
               progress={meeting.transcriptionProgress}
               status={meeting.status}
             />
           </div>
+          <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-3">
+            <DetailField label="Uploaded ISO" value={meeting.createdAt} />
+            <DetailField label="Duration" value={formattedDuration} />
+            <DetailField label="Status" value={presentation.label} />
+          </dl>
           <p className="mt-4 text-sm text-slate-300">
             Current pipeline state: {presentation.label.toLowerCase()}.
           </p>
@@ -82,14 +225,7 @@ export default function MeetingDetailPage({
         <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
           <dl className="grid gap-5 sm:grid-cols-2">
             <DetailField label="Status" value={presentation.label} />
-            <DetailField
-              label="Duration"
-              value={
-                meeting.durationSeconds === null
-                  ? "Not available yet"
-                  : formatDuration(meeting.durationSeconds)
-              }
-            />
+            <DetailField label="Duration" value={formattedDuration} />
             <DetailField
               label="Uploaded"
               value={formatUploadedAt(meeting.createdAt)}
@@ -108,8 +244,100 @@ export default function MeetingDetailPage({
 
           {meeting.status === "error" ? <ErrorBlock meeting={meeting} /> : null}
         </section>
+
+        <section className="mt-8 grid gap-6">
+          <PlaceholderPanel
+            description="Meeting summaries will appear here after the summarization pipeline is connected."
+            title="Summary"
+          />
+          <PlaceholderPanel
+            description="Transcript text and speaker labels will appear here after transcript loading is connected."
+            title="Transcript"
+          />
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-orange-300/25 bg-orange-300/10 p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-orange-100">
+                Delete meeting
+              </h2>
+              <p className="mt-2 text-sm text-orange-50/80">
+                Removes this meeting record and its stored audio artifacts.
+              </p>
+              {actionData?.ok === false &&
+              actionData.intent === "delete-meeting" ? (
+                <p className="mt-3 text-sm font-medium text-orange-100">
+                  {actionData.error}
+                </p>
+              ) : null}
+            </div>
+            <Form
+              method="post"
+              onSubmit={(event) => {
+                if (
+                  !window.confirm(
+                    "Delete this meeting and its stored audio artifacts? This cannot be undone.",
+                  )
+                ) {
+                  event.preventDefault();
+                }
+              }}
+            >
+              <input name="_intent" type="hidden" value="delete-meeting" />
+              <button
+                className="inline-flex items-center justify-center rounded-full border border-orange-200/50 px-5 py-3 text-sm font-semibold text-orange-50 transition hover:bg-orange-200/10 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isDeleting || isUpdatingTitle}
+                type="submit"
+              >
+                {isDeleting ? "Deleting…" : "Delete meeting"}
+              </button>
+            </Form>
+          </div>
+        </section>
       </section>
     </main>
+  );
+}
+
+function TitleFeedback({
+  actionData,
+  feedbackId,
+}: {
+  actionData: MeetingActionData | undefined;
+  feedbackId: string;
+}) {
+  if (actionData?.intent !== "update-title") {
+    return <p className="sr-only" id={feedbackId} />;
+  }
+
+  if (!actionData.ok) {
+    return (
+      <p className="text-sm font-medium text-orange-100" id={feedbackId}>
+        {actionData.error}
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-sm font-medium text-emerald-200" id={feedbackId}>
+      Title saved as “{actionData.title}”.
+    </p>
+  );
+}
+
+function PlaceholderPanel({
+  description,
+  title,
+}: {
+  description: string;
+  title: string;
+}) {
+  return (
+    <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
+      <h2 className="text-2xl font-semibold text-white">{title}</h2>
+      <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>
+    </article>
   );
 }
 

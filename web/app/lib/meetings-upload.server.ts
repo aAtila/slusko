@@ -1,14 +1,17 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import busboy from "busboy";
+import {
+  getMeetingsStorageRoot,
+  removeMeetingDirectory,
+} from "./meeting-storage.server";
 
 const oneMb = 1024 * 1024;
 const defaultMaxUploadMb = 1024;
-const defaultMeetingsStorageRoot = "/data/meetings";
 const allowedRecordingExtensions = new Set([".mp3", ".m4a", ".wav", ".mp4"]);
 
 export type PendingMeetingUpload = {
@@ -83,7 +86,7 @@ export async function createPendingMeetingFromUpload(
     const normalizedError = normalizeUploadError(error, maxUploadBytes);
 
     try {
-      await cleanupMeetingDirectory(meetingsStorageRoot, meetingId);
+      await removeMeetingDirectory({ meetingId, meetingsStorageRoot });
     } catch {
       // Preserve the primary upload failure for the user; cleanup is best-effort.
     }
@@ -314,10 +317,6 @@ function getMaxUploadBytes() {
   return Math.floor(configuredMb * oneMb);
 }
 
-function getMeetingsStorageRoot() {
-  return process.env.MEETINGS_STORAGE_DIR ?? defaultMeetingsStorageRoot;
-}
-
 function getUploadedBy() {
   return process.env.SLUSKO_UPLOADED_BY ?? process.env.USER ?? "local-user";
 }
@@ -339,14 +338,4 @@ function titleFromFilename(filename: string) {
     .slice(0, filename.length - extension.length)
     .trim();
   return withoutExtension.length > 0 ? withoutExtension : "Untitled meeting";
-}
-
-async function cleanupMeetingDirectory(
-  meetingsStorageRoot: string,
-  meetingId: string,
-) {
-  await rm(path.join(meetingsStorageRoot, meetingId), {
-    force: true,
-    recursive: true,
-  });
 }

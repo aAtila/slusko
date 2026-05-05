@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { meetings, type ErrorKind, type MeetingStatus } from "~/db/schema";
+import { isMeetingId } from "./meeting-id";
 import type { HomeMeetingListItem, MeetingDetail } from "./meetings-list";
 
 export type HomeMeetingListRow = {
@@ -54,7 +55,7 @@ export async function loadMeetingDetailRouteData(
   meetingId: string | undefined,
   options: MeetingDetailLoaderOptions = {},
 ) {
-  if (!meetingId || !isUuid(meetingId)) {
+  if (!isMeetingId(meetingId)) {
     throw new Response("Meeting not found", { status: 404 });
   }
 
@@ -89,12 +90,6 @@ async function findMeetingDetailRow(
     .limit(1);
 
   return row ?? null;
-}
-
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(
-    value,
-  );
 }
 
 function serializeHomeMeetingRow(row: HomeMeetingListRow): HomeMeetingListItem {

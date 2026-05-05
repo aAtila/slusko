@@ -94,6 +94,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const meetings = meetingsQuery.data.meetings;
 
   useEffect(() => {
+    queryClient.setQueryData<HomeMeetingsResponse>(homeMeetingsQueryKey, {
+      meetings: loaderData.meetings,
+    });
+  }, [loaderData.meetings, queryClient]);
+
+  useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data?.ok === true) {
       void queryClient.invalidateQueries({ queryKey: homeMeetingsQueryKey });
     }
