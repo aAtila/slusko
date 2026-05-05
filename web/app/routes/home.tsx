@@ -1,18 +1,22 @@
-import { useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import type { MeetingStatus } from "~/db/schema";
+import {
+  getMeetingStatusPresentation,
+  shouldPollMeetings,
+  type HomeMeetingListItem,
+  type MeetingStatusTone,
+} from "~/lib/meetings-list";
+import { formatRelativeTimeFromNow } from "~/lib/relative-time";
 import type { Route } from "./+types/home";
 
 const acceptedRecordingExtensions = [".mp3", ".m4a", ".wav", ".mp4"] as const;
 const acceptedRecordingTypes = acceptedRecordingExtensions.join(",");
+const homeMeetingsQueryKey = ["home-meetings"] as const;
 
-type MeetingListItem = {
-  id: string;
-  title: string;
-  status: MeetingStatus;
-  transcriptionProgress: number | null;
-  durationSeconds: number | null;
-  createdAt: string;
+type HomeMeetingsResponse = {
+  meetings: HomeMeetingListItem[];
 };
 
 type UploadActionData =
@@ -30,30 +34,11 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader() {
-  const [{ desc }, { db }, { meetings }] = await Promise.all([
-    import("drizzle-orm"),
-    import("~/db/client.server"),
-    import("~/db/schema"),
-  ]);
-
-  const rows = await db
-    .select({
-      id: meetings.id,
-      title: meetings.title,
-      status: meetings.status,
-      transcriptionProgress: meetings.transcriptionProgress,
-      durationSeconds: meetings.durationSeconds,
-      createdAt: meetings.createdAt,
-    })
-    .from(meetings)
-    .orderBy(desc(meetings.createdAt));
+  const { loadHomeMeetings } = await import("~/lib/meetings-list.server");
 
   return {
-    meetings: rows.map((meeting) => ({
-      ...meeting,
-      createdAt: meeting.createdAt.toISOString(),
-    })) satisfies MeetingListItem[],
-  };
+    meetings: await loadHomeMeetings(),
+  } satisfies HomeMeetingsResponse;
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -90,7 +75,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { meetings } = loaderData;
+  const queryClient = useQueryClient();
   const fetcher = useFetcher<UploadActionData>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [clientError, setClientError] = useState<string | null>(null);
@@ -98,6 +83,20 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const isUploading = fetcher.state !== "idle";
   const actionError = fetcher.data?.ok === false ? fetcher.data.error : null;
   const uploadError = clientError ?? actionError;
+  const meetingsQuery = useQuery({
+    initialData: { meetings: loaderData.meetings },
+    queryFn: fetchHomeMeetings,
+    queryKey: homeMeetingsQueryKey,
+    refetchInterval: (query) =>
+      shouldPollMeetings(query.state.data?.meetings ?? []) ? 5_000 : false,
+  });
+  const meetings = meetingsQuery.data.meetings;
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.ok === true) {
+      void queryClient.invalidateQueries({ queryKey: homeMeetingsQueryKey });
+    }
+  }, [fetcher.data, fetcher.state, queryClient]);
 
   const submitRecording = (file: File | null | undefined) => {
     if (isUploading) {
@@ -229,32 +228,40 @@ function EmptyMeetings({ isUploading }: { isUploading: boolean }) {
   );
 }
 
-function MeetingList({ meetings }: { meetings: MeetingListItem[] }) {
+function MeetingList({ meetings }: { meetings: HomeMeetingListItem[] }) {
   return (
     <div className="w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-900/70">
       <ul className="divide-y divide-white/10">
-        {meetings.map((meeting) => (
-          <li
-            className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-            key={meeting.id}
-          >
-            <div>
-              <h2 className="text-lg font-medium text-white">
-                {meeting.title}
-              </h2>
-              <p className="mt-1 text-sm text-slate-400">
-                {formatAbsoluteDate(meeting.createdAt)}
-                {meeting.durationSeconds !== null
-                  ? ` · ${formatDuration(meeting.durationSeconds)}`
-                  : ""}
-              </p>
-            </div>
-            <StatusBadge
-              progress={meeting.transcriptionProgress}
-              status={meeting.status}
-            />
-          </li>
-        ))}
+        {meetings.map((meeting) => {
+          const isFailed = meeting.status === "error";
+
+          return (
+            <li
+              className={`flex flex-col gap-4 border-l-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${
+                isFailed
+                  ? "border-l-orange-400 bg-orange-500/10"
+                  : "border-l-transparent"
+              }`}
+              key={meeting.id}
+            >
+              <div>
+                <h2 className="text-lg font-medium text-white">
+                  {meeting.title}
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  <RelativeUploadDate createdAt={meeting.createdAt} />
+                  {meeting.durationSeconds !== null
+                    ? ` · ${formatDuration(meeting.durationSeconds)}`
+                    : ""}
+                </p>
+              </div>
+              <StatusBadge
+                progress={meeting.transcriptionProgress}
+                status={meeting.status}
+              />
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -267,27 +274,44 @@ function StatusBadge({
   progress: number | null;
   status: MeetingStatus;
 }) {
-  const terminalStyles = {
-    done: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
-    error: "border-orange-300/30 bg-orange-300/10 text-orange-200",
-  } as const;
-
-  const className =
-    status === "done" || status === "error"
-      ? terminalStyles[status]
-      : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
-
-  const label =
-    status === "transcribing" && progress !== null
-      ? `Transcribing ${progress}%`
-      : status.replaceAll("_", " ");
+  const presentation = getMeetingStatusPresentation({
+    status,
+    transcriptionProgress: progress,
+  });
+  const toneStyles: Record<MeetingStatusTone, string> = {
+    active: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
+    danger: "border-orange-300/40 bg-orange-300/15 text-orange-100",
+    queued: "border-slate-300/25 bg-slate-300/10 text-slate-200",
+    success: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
+  };
 
   return (
     <span
-      className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold capitalize ${className}`}
+      className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold ${toneStyles[presentation.tone]}`}
     >
-      {label}
+      {presentation.label}
     </span>
+  );
+}
+
+function RelativeUploadDate({ createdAt }: { createdAt: string }) {
+  const [nowMs, setNowMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    const updateNow = () => setNowMs(Date.now());
+
+    updateNow();
+    const intervalId = window.setInterval(updateNow, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  return (
+    <time dateTime={createdAt} suppressHydrationWarning>
+      {nowMs === null
+        ? "Uploaded"
+        : formatRelativeTimeFromNow(createdAt, nowMs)}
+    </time>
   );
 }
 
@@ -308,22 +332,30 @@ function validateRecordingFile(file: File | null | undefined) {
   return null;
 }
 
-function formatAbsoluteDate(value: string) {
-  const createdAt = new Date(value);
-
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeZone: "UTC",
-  }).format(createdAt);
-}
-
 function formatDuration(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(seconds / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
   const remainingSeconds = seconds % 60;
 
-  if (minutes === 0) {
-    return `${remainingSeconds}s`;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
   }
 
-  return `${minutes}m ${remainingSeconds.toString().padStart(2, "0")}s`;
+  if (minutes > 0) {
+    return `${minutes}m ${remainingSeconds.toString().padStart(2, "0")}s`;
+  }
+
+  return `${remainingSeconds}s`;
+}
+
+async function fetchHomeMeetings(): Promise<HomeMeetingsResponse> {
+  const response = await fetch("/api/meetings", {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to refresh meetings.");
+  }
+
+  return (await response.json()) as HomeMeetingsResponse;
 }
