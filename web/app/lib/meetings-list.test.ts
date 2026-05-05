@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { HomeMeetingListItem } from "./meetings-list";
 import {
+  formatDuration,
   getMeetingStatusPresentation,
   shouldPollMeetings,
 } from "./meetings-list";
@@ -38,6 +39,57 @@ describe("meeting list status helpers", () => {
     ] as const) {
       expect(shouldPollMeetings([meeting({ status })])).toBe(true);
     }
+  });
+
+  test("presents every meeting status with the expected label and terminal state", () => {
+    expect(
+      getMeetingStatusPresentation({
+        status: "pending",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Queued", isTerminal: false });
+    expect(
+      getMeetingStatusPresentation({
+        status: "normalizing",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Normalizing audio", isTerminal: false });
+    expect(
+      getMeetingStatusPresentation({
+        status: "transcribing",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Transcribing", isTerminal: false });
+    expect(
+      getMeetingStatusPresentation({
+        status: "diarizing",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Identifying speakers", isTerminal: false });
+    expect(
+      getMeetingStatusPresentation({
+        status: "summarizing",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Summarizing", isTerminal: false });
+    expect(
+      getMeetingStatusPresentation({
+        status: "done",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Done", isTerminal: true });
+    expect(
+      getMeetingStatusPresentation({
+        status: "error",
+        transcriptionProgress: null,
+      }),
+    ).toMatchObject({ label: "Failed", isTerminal: true });
+  });
+
+  test("formats known durations in seconds, minutes, and hours", () => {
+    expect(formatDuration(9)).toBe("9s");
+    expect(formatDuration(75)).toBe("1m 15s");
+    expect(formatDuration(3_905)).toBe("1h 5m");
   });
 
   test("presents transcription progress only while transcribing", () => {

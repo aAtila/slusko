@@ -1,69 +1,112 @@
-"""Minimal worker entrypoint.
-
-This scaffold only verifies database connectivity and stays alive. The real
-LISTEN/NOTIFY queue loop and pipeline stages will be added in later work.
-"""
+"""Slusko worker entrypoint."""
 
 from __future__ import annotations
 
 import logging
 import os
 import signal
-import sys
-import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from threading import Event
 
 import psycopg
 
+from slusko_worker.config import WorkerConfig, apply_hf_home_default, load_config
 from slusko_worker.db.models import MeetingStatus
+from slusko_worker.db.queue import PostgresMeetingQueue
+from slusko_worker.pipeline.normalization import AudioNormalizer
+from slusko_worker.pipeline.runner import PipelineProcessor
+from slusko_worker.queue_loop import QueueLoop, listener_connection_factory
 
 LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
-SLEEP_SECONDS = 30
+WORKER_SINGLETON_LOCK_ID = 77_000_004
 
 logger = logging.getLogger("slusko_worker")
-stop_requested = Event()
 
 
 def configure_logging() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format=LOG_FORMAT)
 
 
-def get_database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to start the worker")
-    return database_url
-
-
-def check_database(database_url: str) -> None:
-    with psycopg.connect(database_url, connect_timeout=5) as connection:
+def check_database(config: WorkerConfig) -> None:
+    with psycopg.connect(
+        config.database_url, **config.database_connect_kwargs
+    ) as connection:
         with connection.cursor() as cursor:
             cursor.execute("select 1")
             cursor.fetchone()
 
 
-def handle_signal(signum: int, _frame: object) -> None:
+@contextmanager
+def worker_singleton_lock(config: WorkerConfig) -> Iterator[None]:
+    """Hold a Postgres advisory lock so issue #7/v1 runs exactly one worker."""
+
+    connection = psycopg.connect(config.database_url, **config.database_connect_kwargs)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "select pg_try_advisory_lock(%s)", [WORKER_SINGLETON_LOCK_ID]
+            )
+            row = cursor.fetchone()
+        connection.commit()
+
+        if row is None or row[0] is not True:
+            raise RuntimeError(
+                "another Slusko worker is already running; v1 supports exactly one worker"
+            )
+
+        yield
+    finally:
+        connection.close()
+
+
+def handle_signal(stop_event: Event, signum: int, _frame: object) -> None:
     logger.info("received shutdown signal", extra={"signal": signum})
-    stop_requested.set()
+    stop_event.set()
 
 
 def run() -> int:
     configure_logging()
-    signal.signal(signal.SIGTERM, handle_signal)
-    signal.signal(signal.SIGINT, handle_signal)
+    stop_requested = Event()
 
-    database_url = get_database_url()
-    meetings_dir = os.getenv("MEETINGS_DIR", "/data/meetings")
+    def request_stop(signum: int, frame: object) -> None:
+        handle_signal(stop_requested, signum, frame)
 
-    check_database(database_url)
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+
+    config = load_config()
+    apply_hf_home_default(config)
+    check_database(config)
+
+    queue = PostgresMeetingQueue.from_database_url(
+        config.database_url, connect_kwargs=config.database_connect_kwargs
+    )
+    processor = PipelineProcessor(
+        queue=queue,
+        normalizer=AudioNormalizer(meetings_dir=config.meetings_dir),
+    )
+    loop = QueueLoop(
+        listener_factory=listener_connection_factory(config),
+        queue=queue,
+        processor=processor,
+        stop_event=stop_requested,
+        poll_interval_seconds=config.poll_interval_seconds,
+    )
+
     logger.info(
-        "worker started as no-op DB-check process; queue states mirrored: %s",
+        "worker starting; queue states mirrored: %s",
         ", ".join(status.value for status in MeetingStatus),
     )
-    logger.info("meetings directory configured at %s", meetings_dir)
+    logger.info("meetings directory configured at %s", config.meetings_dir)
+    logger.info("model cache directory configured at %s", config.model_cache_dir)
+    logger.info(
+        "queue polling fallback configured at %.0f seconds",
+        config.poll_interval_seconds,
+    )
 
-    while not stop_requested.wait(SLEEP_SECONDS):
-        logger.info("worker idle; pipeline loop not implemented yet")
+    with worker_singleton_lock(config):
+        loop.run()
 
     logger.info("worker stopped")
     return 0
@@ -73,7 +116,7 @@ def main() -> None:
     try:
         raise SystemExit(run())
     except Exception:
-        logger.exception("worker failed to start")
+        logger.exception("worker failed")
         raise SystemExit(1) from None
 
 

@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import type { MeetingStatus } from "~/db/schema";
 import {
+  formatDuration,
   getMeetingStatusPresentation,
   shouldPollMeetings,
   type HomeMeetingListItem,
@@ -244,21 +245,26 @@ function MeetingList({ meetings }: { meetings: HomeMeetingListItem[] }) {
               }`}
               key={meeting.id}
             >
-              <div>
-                <h2 className="text-lg font-medium text-white">
-                  {meeting.title}
-                </h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  <RelativeUploadDate createdAt={meeting.createdAt} />
-                  {meeting.durationSeconds !== null
-                    ? ` · ${formatDuration(meeting.durationSeconds)}`
-                    : ""}
-                </p>
-              </div>
-              <StatusBadge
-                progress={meeting.transcriptionProgress}
-                status={meeting.status}
-              />
+              <Link
+                className="flex flex-1 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+                to={`/meetings/${meeting.id}`}
+              >
+                <div>
+                  <h2 className="text-lg font-medium text-white">
+                    {meeting.title}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    <RelativeUploadDate createdAt={meeting.createdAt} />
+                    {meeting.durationSeconds !== null
+                      ? ` · ${formatDuration(meeting.durationSeconds)}`
+                      : ""}
+                  </p>
+                </div>
+                <StatusBadge
+                  progress={meeting.transcriptionProgress}
+                  status={meeting.status}
+                />
+              </Link>
             </li>
           );
         })}
@@ -330,22 +336,6 @@ function validateRecordingFile(file: File | null | undefined) {
   }
 
   return null;
-}
-
-function formatDuration(seconds: number) {
-  const hours = Math.floor(seconds / 3_600);
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  const remainingSeconds = seconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-
-  if (minutes > 0) {
-    return `${minutes}m ${remainingSeconds.toString().padStart(2, "0")}s`;
-  }
-
-  return `${remainingSeconds}s`;
 }
 
 async function fetchHomeMeetings(): Promise<HomeMeetingsResponse> {

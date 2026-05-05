@@ -1,4 +1,4 @@
-import type { MeetingStatus } from "~/db/schema";
+import type { ErrorKind, MeetingStatus } from "~/db/schema";
 
 export type HomeMeetingListItem = {
   id: string;
@@ -7,6 +7,13 @@ export type HomeMeetingListItem = {
   transcriptionProgress: number | null;
   durationSeconds: number | null;
   createdAt: string;
+};
+
+export type MeetingDetail = HomeMeetingListItem & {
+  errorKind: ErrorKind | null;
+  errorMessage: string | null;
+  failedAtStage: MeetingStatus | null;
+  updatedAt: string;
 };
 
 export type MeetingStatusTone = "active" | "danger" | "queued" | "success";
@@ -23,6 +30,22 @@ export function isTerminalMeetingStatus(status: MeetingStatus) {
 
 export function shouldPollMeetings(meetings: HomeMeetingListItem[]) {
   return meetings.some((meeting) => !isTerminalMeetingStatus(meeting.status));
+}
+
+export function formatDuration(seconds: number) {
+  const hours = Math.floor(seconds / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${remainingSeconds.toString().padStart(2, "0")}s`;
+  }
+
+  return `${remainingSeconds}s`;
 }
 
 export function getMeetingStatusPresentation({

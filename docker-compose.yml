@@ -39,6 +39,8 @@ services:
     environment:
       DATABASE_URL: postgres://slusko:slusko@postgres:5432/slusko
       MEETINGS_DIR: /data/meetings
+      MODEL_CACHE_DIR: /data/models
+      HF_HOME: /data/models
     depends_on:
       postgres:
         condition: service_healthy

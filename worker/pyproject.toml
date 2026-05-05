@@ -8,6 +8,11 @@ dependencies = [
   "psycopg[binary]>=3.2,<4",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+]
+
 [project.scripts]
 slusko-worker = "slusko_worker.main:main"
 
@@ -17,3 +22,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
