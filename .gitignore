@@ -42,6 +42,7 @@ build/
 # === Docker ===
 # Data volumes mounted at runtime; never commit their contents
 /data/
+.scratch
 
 # === Logs ===
 *.log
