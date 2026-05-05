@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "bun run app/db/seed.ts",
+    "db:seed:reset": "bun run app/db/seed.ts --reset",
     "db:studio": "drizzle-kit studio",
     "dev": "react-router dev",
     "format": "prettier --write .",

@@ -2,18 +2,41 @@ import { describe, expect, test } from "bun:test";
 import { developmentMeetingSeeds } from "./seed-data";
 
 describe("development meeting seeds", () => {
-  test("cover useful local meeting states with stable IDs", () => {
+  test("cover every canonical meeting status with stable IDs", () => {
     const ids = developmentMeetingSeeds.map((meeting) => meeting.id);
     const statuses = new Set(
       developmentMeetingSeeds.map((meeting) => meeting.status),
     );
 
-    expect(developmentMeetingSeeds.length).toBeGreaterThanOrEqual(4);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(statuses).toContain("pending");
-    expect(statuses).toContain("transcribing");
-    expect(statuses).toContain("done");
-    expect(statuses).toContain("error");
+    expect(statuses).toEqual(
+      new Set([
+        "pending",
+        "normalizing",
+        "transcribing",
+        "diarizing",
+        "summarizing",
+        "done",
+        "error",
+      ]),
+    );
+  });
+
+  test("include transcribing examples with and without numeric progress", () => {
+    const transcribingSeeds = developmentMeetingSeeds.filter(
+      (meeting) => meeting.status === "transcribing",
+    );
+
+    expect(
+      transcribingSeeds.some(
+        (meeting) => meeting.transcriptionProgress !== null,
+      ),
+    ).toBe(true);
+    expect(
+      transcribingSeeds.some(
+        (meeting) => meeting.transcriptionProgress === null,
+      ),
+    ).toBe(true);
   });
 
   test("include examples for split recordings and pipeline failure state", () => {

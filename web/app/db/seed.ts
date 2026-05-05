@@ -3,7 +3,11 @@ import { db, sqlClient } from "./client.server";
 import { meetings } from "./schema";
 import { developmentMeetingSeeds } from "./seed-data";
 
-export async function seedDevelopmentMeetings() {
+export async function seedDevelopmentMeetings({ reset = false } = {}) {
+  if (reset) {
+    await db.delete(meetings);
+  }
+
   await db
     .insert(meetings)
     .values(developmentMeetingSeeds)
@@ -29,9 +33,15 @@ export async function seedDevelopmentMeetings() {
 }
 
 if (import.meta.main) {
+  const reset = process.argv.includes("--reset");
+
   try {
-    const count = await seedDevelopmentMeetings();
-    console.log(`Seeded ${count} development meetings.`);
+    const count = await seedDevelopmentMeetings({ reset });
+    console.log(
+      reset
+        ? `Reset database and seeded ${count} development meetings.`
+        : `Seeded ${count} development meetings.`,
+    );
   } finally {
     await sqlClient.end();
   }
