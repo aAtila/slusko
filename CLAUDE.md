@@ -8,7 +8,7 @@ Issues live as GitHub issues in `aAtila/slusko`, managed via the `gh` CLI. See `
 
 ### Triage labels
 
-Canonical role names — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+Canonical role names — `needs-triage`, `needs-info`, `blocked`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

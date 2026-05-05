@@ -1,6 +1,8 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+The skills speak in terms of canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+
+This repo also uses `blocked` as a local state role for issues that are already understood but cannot be picked up until one or more open blockers in their `## Blocked by` section are completed. `blocked` replaces `needs-triage` for those issues; when blockers clear, move the issue back to `needs-triage` or forward to `ready-for-agent` / `ready-for-human` as appropriate.
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
@@ -8,6 +10,7 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `needs-info`               | `needs-info`         | Waiting on reporter for more information |
 | `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
+| `blocked`                  | `blocked`            | Waiting on one or more open blocker issues |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
