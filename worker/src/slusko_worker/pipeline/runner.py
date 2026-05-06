@@ -23,7 +23,7 @@ class RecoveryQueue(Protocol):
     def mark_recovery_not_implemented(self, meeting: QueuedMeeting) -> None: ...
 
 
-class TranscriptionQueue(RecoveryQueue, Protocol):
+class PipelineQueue(RecoveryQueue, Protocol):
     def mark_normalization_started(self, meeting: QueuedMeeting) -> None: ...
 
     def mark_transcription_started(
@@ -35,6 +35,16 @@ class TranscriptionQueue(RecoveryQueue, Protocol):
     ) -> None: ...
 
     def mark_transcription_succeeded(
+        self, *, meeting: QueuedMeeting, segments: Sequence[TranscriptSegmentDraft]
+    ) -> None: ...
+
+    def load_transcript_segments(
+        self, meeting: QueuedMeeting
+    ) -> list[TranscriptSegmentDraft]: ...
+
+    def mark_diarization_started(self, meeting: QueuedMeeting) -> None: ...
+
+    def mark_diarization_succeeded(
         self, *, meeting: QueuedMeeting, segments: Sequence[TranscriptSegmentDraft]
     ) -> None: ...
 
@@ -67,20 +77,32 @@ class Transcriber(Protocol):
     ) -> Sequence[TranscriptSegmentDraft]: ...
 
 
+class Diarizer(Protocol):
+    def diarize(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        normalized_path: Path,
+        transcript_segments: Sequence[TranscriptSegmentDraft],
+    ) -> Sequence[TranscriptSegmentDraft]: ...
+
+
 class PipelineProcessor:
     """Dispatch claimed meetings to the currently implemented pipeline stages."""
 
     def __init__(
         self,
         *,
-        queue: TranscriptionQueue,
+        queue: PipelineQueue,
         normalizer: Normalizer,
         transcriber: Transcriber,
+        diarizer: Diarizer,
         meetings_dir: str | Path,
     ) -> None:
         self._queue = queue
         self._normalizer = normalizer
         self._transcriber = transcriber
+        self._diarizer = diarizer
         self._meetings_dir = Path(meetings_dir)
 
     def process(self, meeting: QueuedMeeting) -> None:
@@ -89,12 +111,16 @@ class PipelineProcessor:
             return
 
         if meeting.status == MeetingStatus.TRANSCRIBING:
-            normalized_path = self._meetings_dir / str(meeting.id) / NORMALIZED_FILENAME
+            normalized_path = self._normalized_path(meeting)
             self._process_transcription(
                 meeting=meeting,
                 normalized_path=normalized_path,
                 duration_seconds=None,
             )
+            return
+
+        if meeting.status == MeetingStatus.DIARIZING:
+            self._process_diarization_reentry(meeting)
             return
 
         logger.warning(
@@ -159,6 +185,71 @@ class PipelineProcessor:
             return
 
         self._queue.mark_transcription_succeeded(meeting=meeting, segments=segments)
+        transcript_segments = self._load_transcript_segments_for_diarization(meeting)
+        if transcript_segments is None:
+            return
+        self._process_diarization(
+            meeting=meeting,
+            normalized_path=normalized_path,
+            transcript_segments=transcript_segments,
+        )
+
+    def _process_diarization_reentry(self, meeting: QueuedMeeting) -> None:
+        transcript_segments = self._load_transcript_segments_for_diarization(meeting)
+        if transcript_segments is None:
+            return
+
+        self._process_diarization(
+            meeting=meeting,
+            normalized_path=self._normalized_path(meeting),
+            transcript_segments=transcript_segments,
+        )
+
+    def _load_transcript_segments_for_diarization(
+        self, meeting: QueuedMeeting
+    ) -> list[TranscriptSegmentDraft] | None:
+        try:
+            return self._queue.load_transcript_segments(meeting)
+        except Exception as error:
+            logger.exception("failed to load transcript rows for meeting %s", meeting.id)
+            self._queue.mark_failure(
+                meeting=meeting,
+                error_kind=ErrorKind.UNKNOWN,
+                error_message=str(error) or error.__class__.__name__,
+                failed_at_stage=MeetingStatus.DIARIZING,
+            )
+            return None
+
+    def _process_diarization(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        normalized_path: Path,
+        transcript_segments: Sequence[TranscriptSegmentDraft],
+    ) -> None:
+        self._queue.mark_diarization_started(meeting)
+        try:
+            diarized_segments = self._diarizer.diarize(
+                meeting=meeting,
+                normalized_path=normalized_path,
+                transcript_segments=transcript_segments,
+            )
+        except PipelineError as error:
+            self._write_pipeline_failure(meeting, error)
+            return
+        except Exception as error:
+            logger.exception("unexpected diarization failure for meeting %s", meeting.id)
+            self._queue.mark_failure(
+                meeting=meeting,
+                error_kind=ErrorKind.UNKNOWN,
+                error_message=str(error) or error.__class__.__name__,
+                failed_at_stage=MeetingStatus.DIARIZING,
+            )
+            return
+
+        self._queue.mark_diarization_succeeded(
+            meeting=meeting, segments=diarized_segments
+        )
 
     def _safe_mark_transcription_progress(
         self, *, meeting: QueuedMeeting, progress: int
@@ -169,6 +260,9 @@ class PipelineProcessor:
             logger.exception(
                 "transcription progress write failed for meeting %s", meeting.id
             )
+
+    def _normalized_path(self, meeting: QueuedMeeting) -> Path:
+        return self._meetings_dir / str(meeting.id) / NORMALIZED_FILENAME
 
     def _write_pipeline_failure(
         self, meeting: QueuedMeeting, error: PipelineError

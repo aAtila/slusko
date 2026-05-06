@@ -42,10 +42,35 @@ describe("TranscriptPanel", () => {
     expect(markup).toContain("[0:00]");
     expect(markup).toContain("[1:15]");
     expect(markup).toContain("SPEAKER_00");
+    expect(markup).toContain("SPEAKER_01");
     expect(markup).toContain("Next step.");
     expect(markup).not.toContain("<input");
     expect(markup).not.toContain("<textarea");
     expect(markup).not.toContain("contenteditable");
+  });
+
+  test("keeps transcript rows visible while diarizing", () => {
+    const markup = renderTranscriptPanel({
+      status: "diarizing",
+      segments: [
+        {
+          id: "00000000-0000-4000-8000-00000000a113",
+          startSeconds: 12,
+          endSeconds: 16,
+          speakerLabel: "SPEAKER_01",
+          text: "Diarization can continue while rows remain visible.",
+        },
+      ],
+    });
+
+    expect(markup).toContain("SPEAKER_01");
+    expect(markup).toContain(
+      "Diarization can continue while rows remain visible.",
+    );
+    expect(markup).not.toContain("Transcript will appear here");
+    expect(markup).not.toContain("Map speaker");
+    expect(markup).not.toContain("speaker mapping");
+    expect(markup).not.toContain("<select");
   });
 
   test("renders status-aware empty state copy", () => {

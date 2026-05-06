@@ -15,6 +15,8 @@ class WorkerConfig:
     whisper_model: str = "large-v3"
     whisper_device: str = "auto"
     whisper_compute_type: str = "auto"
+    pyannote_model: str = "pyannote/speaker-diarization-3.1"
+    huggingface_token: str | None = None
     transcription_progress_min_delta: int = 5
     transcription_progress_min_interval_seconds: float = 5.0
     poll_interval_seconds: float = 300
@@ -65,6 +67,8 @@ def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
         whisper_model=env.get("WHISPER_MODEL", "large-v3"),
         whisper_device=env.get("WHISPER_DEVICE", "auto"),
         whisper_compute_type=env.get("WHISPER_COMPUTE_TYPE", "auto"),
+        pyannote_model=env.get("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1"),
+        huggingface_token=env.get("HUGGINGFACE_TOKEN") or env.get("HF_TOKEN"),
         transcription_progress_min_delta=_positive_int(
             env.get("TRANSCRIPTION_PROGRESS_MIN_DELTA"), default=5
         ),

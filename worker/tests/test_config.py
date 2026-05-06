@@ -21,6 +21,8 @@ def test_load_config_sets_listener_autocommit_and_tcp_keepalives() -> None:
     assert config.whisper_model == "large-v3"
     assert config.whisper_device == "auto"
     assert config.whisper_compute_type == "auto"
+    assert config.pyannote_model == "pyannote/speaker-diarization-3.1"
+    assert config.huggingface_token is None
     assert config.transcription_progress_min_delta == 5
     assert config.transcription_progress_min_interval_seconds == 5.0
 
@@ -100,3 +102,39 @@ def test_load_config_falls_back_for_invalid_progress_settings() -> None:
 
     assert config.transcription_progress_min_delta == 5
     assert config.transcription_progress_min_interval_seconds == 5.0
+
+
+def test_load_config_parses_pyannote_model_and_huggingface_token() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "PYANNOTE_MODEL": "pyannote/speaker-diarization-3.1-custom",
+            "HUGGINGFACE_TOKEN": "primary-token",
+        }
+    )
+
+    assert config.pyannote_model == "pyannote/speaker-diarization-3.1-custom"
+    assert config.huggingface_token == "primary-token"
+
+
+def test_load_config_uses_hf_token_fallback_when_huggingface_token_missing() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "HF_TOKEN": "fallback-token",
+        }
+    )
+
+    assert config.huggingface_token == "fallback-token"
+
+
+def test_load_config_prefers_huggingface_token_over_hf_token() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "HUGGINGFACE_TOKEN": "primary-token",
+            "HF_TOKEN": "fallback-token",
+        }
+    )
+
+    assert config.huggingface_token == "primary-token"

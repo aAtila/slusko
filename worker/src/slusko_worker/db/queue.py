@@ -140,7 +140,7 @@ insert into transcript_segments (
 MARK_TRANSCRIPTION_SUCCEEDED_SQL = """
 update meetings
 set
-  status = 'done',
+  status = 'diarizing',
   transcription_progress = 100,
   error_kind = null,
   error_message = null,
@@ -148,6 +148,41 @@ set
   updated_at = now()
 where id = %(meeting_id)s
   and status = 'transcribing'
+"""
+
+LOAD_TRANSCRIPT_SEGMENTS_SQL = """
+select
+  start_seconds,
+  end_seconds,
+  speaker_label,
+  text
+from transcript_segments
+where meeting_id = %(meeting_id)s
+order by start_seconds asc, end_seconds asc, id asc
+"""
+
+MARK_DIARIZATION_STARTED_SQL = """
+update meetings
+set
+  status = 'diarizing',
+  error_kind = null,
+  error_message = null,
+  failed_at_stage = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'diarizing'
+"""
+
+MARK_DIARIZATION_SUCCEEDED_SQL = """
+update meetings
+set
+  status = 'done',
+  error_kind = null,
+  error_message = null,
+  failed_at_stage = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'diarizing'
 """
 
 MARK_FAILURE_SQL = """
@@ -252,7 +287,7 @@ class PostgresMeetingQueue:
         meeting: QueuedMeeting,
         segments: Sequence[TranscriptSegmentDraft],
     ) -> None:
-        """Replace transcript rows and finish the transcription vertical slice."""
+        """Replace transcript rows and hand the meeting to diarization."""
 
         if not segments:
             raise ValueError("at least one transcript segment is required")
@@ -260,23 +295,57 @@ class PostgresMeetingQueue:
         with self._connection_factory() as connection:
             with connection.transaction():
                 with connection.cursor() as cursor:
-                    cursor.execute(
-                        DELETE_TRANSCRIPT_SEGMENTS_SQL,
-                        {"meeting_id": meeting.id},
-                    )
-                    for segment in segments:
-                        cursor.execute(
-                            INSERT_TRANSCRIPT_SEGMENT_SQL,
-                            {
-                                "meeting_id": meeting.id,
-                                "start_seconds": f"{segment.start_seconds:.3f}",
-                                "end_seconds": f"{segment.end_seconds:.3f}",
-                                "speaker_label": segment.speaker_label,
-                                "text": segment.text,
-                            },
-                        )
+                    _replace_transcript_segments(cursor, meeting=meeting, segments=segments)
                     cursor.execute(
                         MARK_TRANSCRIPTION_SUCCEEDED_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError(
+                            f"meeting status write updated {cursor.rowcount} rows"
+                        )
+
+    def load_transcript_segments(
+        self, meeting: QueuedMeeting
+    ) -> list[TranscriptSegmentDraft]:
+        """Load transcript rows for a claimed diarization-stage meeting."""
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor(row_factory=dict_row) as cursor:
+                    cursor.execute(
+                        LOAD_TRANSCRIPT_SEGMENTS_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+                    rows = cursor.fetchall()
+
+        return [_transcript_segment_from_row(row) for row in rows]
+
+    def mark_diarization_started(self, meeting: QueuedMeeting) -> None:
+        """Enter diarization without deleting transcript rows needed as input."""
+
+        self._execute(
+            MARK_DIARIZATION_STARTED_SQL,
+            {"meeting_id": meeting.id},
+        )
+
+    def mark_diarization_succeeded(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        segments: Sequence[TranscriptSegmentDraft],
+    ) -> None:
+        """Idempotently replace diarized transcript rows and finish the meeting."""
+
+        if not segments:
+            raise ValueError("at least one transcript segment is required")
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    _replace_transcript_segments(cursor, meeting=meeting, segments=segments)
+                    cursor.execute(
+                        MARK_DIARIZATION_SUCCEEDED_SQL,
                         {"meeting_id": meeting.id},
                     )
                     if cursor.rowcount != 1:
@@ -330,6 +399,29 @@ class PostgresMeetingQueue:
                         )
 
 
+def _replace_transcript_segments(
+    cursor: Any,
+    *,
+    meeting: QueuedMeeting,
+    segments: Sequence[TranscriptSegmentDraft],
+) -> None:
+    cursor.execute(
+        DELETE_TRANSCRIPT_SEGMENTS_SQL,
+        {"meeting_id": meeting.id},
+    )
+    for segment in segments:
+        cursor.execute(
+            INSERT_TRANSCRIPT_SEGMENT_SQL,
+            {
+                "meeting_id": meeting.id,
+                "start_seconds": f"{segment.start_seconds:.3f}",
+                "end_seconds": f"{segment.end_seconds:.3f}",
+                "speaker_label": segment.speaker_label,
+                "text": segment.text,
+            },
+        )
+
+
 def _meeting_from_row(row: dict[str, object]) -> QueuedMeeting:
     return QueuedMeeting(
         id=row["id"],
@@ -339,6 +431,15 @@ def _meeting_from_row(row: dict[str, object]) -> QueuedMeeting:
         error_kind=_maybe_error_kind(row["error_kind"]),
         error_message=row["error_message"],
         failed_at_stage=_maybe_status(row["failed_at_stage"]),
+    )
+
+
+def _transcript_segment_from_row(row: dict[str, object]) -> TranscriptSegmentDraft:
+    return TranscriptSegmentDraft(
+        start_seconds=float(row["start_seconds"]),
+        end_seconds=float(row["end_seconds"]),
+        speaker_label=str(row["speaker_label"]),
+        text=str(row["text"]),
     )
 
 

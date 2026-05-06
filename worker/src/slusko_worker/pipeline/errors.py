@@ -53,6 +53,23 @@ class TranscriptionFailed(PipelineError):
         )
 
 
+class DiarizationFailed(PipelineError):
+    """Diarization stage failed before producing usable speaker labels."""
+
+    def __init__(self, message: str, *, config_missing: bool = False) -> None:
+        super().__init__(message)
+        self.config_missing = config_missing
+
+    def to_failure(self) -> PipelineFailure:
+        return PipelineFailure(
+            error_kind=ErrorKind.CONFIG_MISSING
+            if self.config_missing
+            else ErrorKind.DIARIZATION_FAILED,
+            error_message=str(self),
+            failed_at_stage=MeetingStatus.DIARIZING,
+        )
+
+
 class TranscriptionEmpty(PipelineError):
     """Whisper completed, but ADR-0007 says the transcript has no speech."""
 

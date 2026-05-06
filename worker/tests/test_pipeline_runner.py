@@ -11,6 +11,7 @@ from slusko_worker.db.models import (
     TranscriptSegmentDraft,
 )
 from slusko_worker.pipeline.errors import (
+    DiarizationFailed,
     NormalizationFailed,
     TranscriptionEmpty,
     TranscriptionFailed,
@@ -43,6 +44,14 @@ class FakeQueue:
     def __init__(self, *, progress_error: Exception | None = None) -> None:
         self.events: list[object] = []
         self.progress_error = progress_error
+        self.transcript_segments: list[TranscriptSegmentDraft] = [
+            TranscriptSegmentDraft(
+                start_seconds=0.0,
+                end_seconds=1.0,
+                speaker_label="SPEAKER_00",
+                text="Loaded transcript",
+            )
+        ]
 
     def mark_normalization_started(self, meeting: QueuedMeeting) -> None:
         self.events.append(("normalization_started", meeting.id))
@@ -62,7 +71,20 @@ class FakeQueue:
     def mark_transcription_succeeded(
         self, *, meeting: QueuedMeeting, segments: list[TranscriptSegmentDraft]
     ) -> None:
+        self.transcript_segments = list(segments)
         self.events.append(("transcription_succeeded", meeting.id, segments))
+
+    def load_transcript_segments(self, meeting: QueuedMeeting) -> list[TranscriptSegmentDraft]:
+        self.events.append(("load_transcript_segments", meeting.id))
+        return self.transcript_segments
+
+    def mark_diarization_started(self, meeting: QueuedMeeting) -> None:
+        self.events.append(("diarization_started", meeting.id))
+
+    def mark_diarization_succeeded(
+        self, *, meeting: QueuedMeeting, segments: list[TranscriptSegmentDraft]
+    ) -> None:
+        self.events.append(("diarization_succeeded", meeting.id, segments))
 
     def mark_failure(
         self,
@@ -142,22 +164,62 @@ class FakeTranscriber:
         return self.segments
 
 
+class FakeDiarizer:
+    def __init__(
+        self,
+        segments: list[TranscriptSegmentDraft] | None = None,
+        error: Exception | None = None,
+        shared_events: list[object] | None = None,
+    ) -> None:
+        self.segments = segments
+        self.error = error
+        self.events: list[object] = []
+        self.shared_events = shared_events
+
+    def diarize(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        normalized_path: Path,
+        transcript_segments: list[TranscriptSegmentDraft],
+    ) -> list[TranscriptSegmentDraft]:
+        event = ("diarize", meeting.id, normalized_path, transcript_segments)
+        self.events.append(event)
+        if self.shared_events is not None:
+            self.shared_events.append(event)
+        if self.error is not None:
+            raise self.error
+        if self.segments is not None:
+            return self.segments
+        return [
+            TranscriptSegmentDraft(
+                start_seconds=segment.start_seconds,
+                end_seconds=segment.end_seconds,
+                speaker_label="SPEAKER_01",
+                text=segment.text,
+            )
+            for segment in transcript_segments
+        ]
+
+
 def make_processor(
     *,
     queue: FakeQueue,
     normalizer: FakeNormalizer | None = None,
     transcriber: FakeTranscriber | None = None,
+    diarizer: FakeDiarizer | None = None,
     meetings_dir: str | Path = "/meetings",
 ) -> PipelineProcessor:
     return PipelineProcessor(
         queue=queue,
         normalizer=normalizer or FakeNormalizer(FakeNormalizationResult(42)),
         transcriber=transcriber or FakeTranscriber(shared_events=queue.events),
+        diarizer=diarizer or FakeDiarizer(shared_events=queue.events),
         meetings_dir=meetings_dir,
     )
 
 
-def test_pending_meeting_normalizes_then_transcribes_and_finishes_this_vertical_slice() -> None:
+def test_pending_meeting_normalizes_transcribes_diarizes_and_finishes() -> None:
     queue = FakeQueue()
     normalizer = FakeNormalizer(
         FakeNormalizationResult(duration_seconds=42, normalized_path=Path("/tmp/normalized.wav")),
@@ -171,10 +233,21 @@ def test_pending_meeting_normalizes_then_transcribes_and_finishes_this_vertical_
             text="Hello world",
         )
     ]
+    diarized_segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.5,
+            speaker_label="SPEAKER_01",
+            text="Hello world",
+        )
+    ]
     transcriber = FakeTranscriber(
         segments=segments, progress_updates=[25], shared_events=queue.events
     )
-    processor = make_processor(queue=queue, normalizer=normalizer, transcriber=transcriber)
+    diarizer = FakeDiarizer(segments=diarized_segments, shared_events=queue.events)
+    processor = make_processor(
+        queue=queue, normalizer=normalizer, transcriber=transcriber, diarizer=diarizer
+    )
 
     processor.process(queued_meeting(MeetingStatus.PENDING))
 
@@ -185,6 +258,10 @@ def test_pending_meeting_normalizes_then_transcribes_and_finishes_this_vertical_
         ("transcribe", MEETING_ID, Path("/tmp/normalized.wav")),
         ("transcription_progress", MEETING_ID, 25),
         ("transcription_succeeded", MEETING_ID, segments),
+        ("load_transcript_segments", MEETING_ID),
+        ("diarization_started", MEETING_ID),
+        ("diarize", MEETING_ID, Path("/tmp/normalized.wav"), segments),
+        ("diarization_succeeded", MEETING_ID, diarized_segments),
     ]
     assert normalizer.events == [("normalize", MEETING_ID)]
 
@@ -211,7 +288,7 @@ def test_transcribing_reentry_skips_normalization_and_reuses_normalized_artifact
         )
     ]
     assert queue.events[0] == ("transcription_started", MEETING_ID, None)
-    assert queue.events[-1][0] == "transcription_succeeded"
+    assert queue.events[-1][0] == "diarization_succeeded"
 
 
 def test_progress_write_failures_do_not_abort_successful_transcription() -> None:
@@ -221,8 +298,7 @@ def test_progress_write_failures_do_not_abort_successful_transcription() -> None
 
     processor.process(queued_meeting(MeetingStatus.PENDING))
 
-    assert queue.events[-1][0] == "transcription_succeeded"
-
+    assert queue.events[-1][0] == "diarization_succeeded"
 
 def test_unexpected_normalization_error_writes_unknown_failure() -> None:
     queue = FakeQueue()
@@ -312,10 +388,129 @@ def test_unexpected_transcription_error_writes_unknown_failure_at_transcribing()
     )
 
 
-def test_later_stage_recovery_still_uses_boundary_stub() -> None:
+def test_diarizing_reentry_loads_existing_transcript_and_finishes_without_retranscribing() -> None:
     queue = FakeQueue()
-    processor = make_processor(queue=queue)
+    normalizer = FakeNormalizer(FakeNormalizationResult(duration_seconds=42))
+    transcriber = FakeTranscriber(shared_events=queue.events)
+    loaded_segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.0,
+            speaker_label="SPEAKER_00",
+            text="Loaded transcript",
+        )
+    ]
+    diarized_segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.0,
+            speaker_label="SPEAKER_01",
+            text="Loaded transcript",
+        )
+    ]
+
+    def load_transcript_segments(meeting: QueuedMeeting) -> list[TranscriptSegmentDraft]:
+        queue.events.append(("load_transcript_segments", meeting.id))
+        return loaded_segments
+
+    queue.load_transcript_segments = load_transcript_segments  # type: ignore[method-assign]
+    diarizer = FakeDiarizer(segments=diarized_segments, shared_events=queue.events)
+    processor = make_processor(
+        queue=queue,
+        normalizer=normalizer,
+        transcriber=transcriber,
+        diarizer=diarizer,
+        meetings_dir="/data/meetings",
+    )
 
     processor.process(queued_meeting(MeetingStatus.DIARIZING))
 
-    assert queue.events == [("recovery_not_implemented", MEETING_ID, MeetingStatus.DIARIZING)]
+    assert normalizer.events == []
+    assert transcriber.events == []
+    assert queue.events == [
+        ("load_transcript_segments", MEETING_ID),
+        ("diarization_started", MEETING_ID),
+        (
+            "diarize",
+            MEETING_ID,
+            Path("/data/meetings") / str(MEETING_ID) / "normalized.wav",
+            loaded_segments,
+        ),
+        ("diarization_succeeded", MEETING_ID, diarized_segments),
+    ]
+
+
+def test_diarization_failure_writes_adr_0007_error_fields() -> None:
+    queue = FakeQueue()
+    diarizer = FakeDiarizer(error=DiarizationFailed("pyannote rejected audio"))
+    processor = make_processor(queue=queue, diarizer=diarizer)
+
+    processor.process(queued_meeting(MeetingStatus.PENDING))
+
+    assert queue.events[-1] == (
+        "failure",
+        MEETING_ID,
+        ErrorKind.DIARIZATION_FAILED,
+        "pyannote rejected audio",
+        MeetingStatus.DIARIZING,
+    )
+
+
+def test_unexpected_diarization_error_writes_unknown_failure_at_diarizing() -> None:
+    queue = FakeQueue()
+    diarizer = FakeDiarizer(error=RuntimeError("pyannote exploded"))
+    processor = make_processor(queue=queue, diarizer=diarizer)
+
+    processor.process(queued_meeting(MeetingStatus.PENDING))
+
+    assert queue.events[-1] == (
+        "failure",
+        MEETING_ID,
+        ErrorKind.UNKNOWN,
+        "pyannote exploded",
+        MeetingStatus.DIARIZING,
+    )
+
+
+def test_empty_transcript_at_diarizing_maps_to_diarization_failure() -> None:
+    queue = FakeQueue()
+
+    def load_transcript_segments(meeting: QueuedMeeting) -> list[TranscriptSegmentDraft]:
+        queue.events.append(("load_transcript_segments", meeting.id))
+        return []
+
+    queue.load_transcript_segments = load_transcript_segments  # type: ignore[method-assign]
+    diarizer = FakeDiarizer(
+        error=DiarizationFailed("diarization requires at least one transcript segment"),
+        shared_events=queue.events,
+    )
+    processor = make_processor(queue=queue, diarizer=diarizer)
+
+    processor.process(queued_meeting(MeetingStatus.DIARIZING))
+
+    assert queue.events == [
+        ("load_transcript_segments", MEETING_ID),
+        ("diarization_started", MEETING_ID),
+        (
+            "diarize",
+            MEETING_ID,
+            Path("/meetings") / str(MEETING_ID) / "normalized.wav",
+            [],
+        ),
+        (
+            "failure",
+            MEETING_ID,
+            ErrorKind.DIARIZATION_FAILED,
+            "diarization requires at least one transcript segment",
+            MeetingStatus.DIARIZING,
+        ),
+    ]
+
+
+def test_summarizing_recovery_still_uses_boundary_stub() -> None:
+    queue = FakeQueue()
+    processor = make_processor(queue=queue)
+
+    processor.process(queued_meeting(MeetingStatus.SUMMARIZING))
+
+    assert queue.events == [("recovery_not_implemented", MEETING_ID, MeetingStatus.SUMMARIZING)]

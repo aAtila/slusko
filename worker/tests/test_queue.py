@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from slusko_worker.db.models import MeetingStatus, QueuedMeeting, TranscriptSegmentDraft
+from slusko_worker.db.models import ErrorKind, MeetingStatus, QueuedMeeting, TranscriptSegmentDraft
 from slusko_worker.db.queue import (
     CLAIM_NEXT_MEETING_SQL,
     NON_TERMINAL_STATUSES,
@@ -32,7 +33,7 @@ class RecordingTransaction:
 class RecordingCursor:
     def __init__(self, connection: RecordingConnection) -> None:
         self.connection = connection
-        self.rowcount = connection.next_rowcount()
+        self.rowcount = connection.rowcount
 
     def __enter__(self) -> RecordingCursor:
         self.connection.events.append("cursor_open")
@@ -42,6 +43,7 @@ class RecordingCursor:
         self.connection.events.append("cursor_close")
 
     def execute(self, sql: str, params: object | None = None) -> None:
+        self.rowcount = self.connection.next_rowcount()
         self.connection.executed_sql = sql
         self.connection.executed_params = params
         self.connection.executed_statements.append((sql, params))
@@ -51,16 +53,22 @@ class RecordingCursor:
         self.connection.events.append("fetchone")
         return self.connection.row
 
+    def fetchall(self) -> list[dict[str, object]]:
+        self.connection.events.append("fetchall")
+        return self.connection.rows
+
 
 class RecordingConnection:
     def __init__(
         self,
         row: dict[str, object] | None,
         *,
+        rows: list[dict[str, object]] | None = None,
         rowcount: int = 1,
         rowcounts: list[int] | None = None,
     ) -> None:
         self.row = row
+        self.rows = rows or []
         self.rowcount = rowcount
         self.rowcounts = rowcounts or []
         self.events: list[object] = []
@@ -239,7 +247,7 @@ def test_mark_transcription_progress_rejects_terminal_or_invalid_progress() -> N
             queue.mark_transcription_progress(meeting=meeting, progress=progress)
 
 
-def test_mark_transcription_succeeded_replaces_segments_and_marks_done() -> None:
+def test_mark_transcription_succeeded_replaces_segments_and_marks_diarizing() -> None:
     connection = RecordingConnection(row=None, rowcounts=[1, 1, 1, 1])
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
@@ -283,10 +291,212 @@ def test_mark_transcription_succeeded_replaces_segments_and_marks_done() -> None
         "text": "Hello world",
     }
     update_sql, update_params = statements[-1]
-    assert "status = 'done'" in update_sql
+    assert "status = 'diarizing'" in update_sql
     assert "transcription_progress = 100" in update_sql
     assert "where id = %(meeting_id)s and status = 'transcribing'" in update_sql
     assert update_params == {"meeting_id": meeting.id}
+
+
+def test_load_transcript_segments_returns_ordered_segment_drafts() -> None:
+    meeting_id = UUID("00000000-0000-0000-0000-000000000001")
+    connection = RecordingConnection(
+        row=None,
+        rows=[
+            {
+                "start_seconds": Decimal("0.500"),
+                "end_seconds": Decimal("1.250"),
+                "speaker_label": "SPEAKER_00",
+                "text": "First by time",
+            },
+            {
+                "start_seconds": Decimal("1.250"),
+                "end_seconds": Decimal("2.000"),
+                "speaker_label": "SPEAKER_01",
+                "text": "Second by time",
+            },
+        ],
+    )
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=meeting_id,
+        status=MeetingStatus.DIARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    segments = queue.load_transcript_segments(meeting)
+
+    sql = normalize_sql(connection.executed_sql)
+    assert "from transcript_segments" in sql
+    assert "where meeting_id = %(meeting_id)s" in sql
+    assert "order by start_seconds asc, end_seconds asc, id asc" in sql
+    assert connection.executed_params == {"meeting_id": meeting_id}
+    assert segments == [
+        TranscriptSegmentDraft(
+            start_seconds=0.5,
+            end_seconds=1.25,
+            speaker_label="SPEAKER_00",
+            text="First by time",
+        ),
+        TranscriptSegmentDraft(
+            start_seconds=1.25,
+            end_seconds=2.0,
+            speaker_label="SPEAKER_01",
+            text="Second by time",
+        ),
+    ]
+
+
+def test_mark_diarization_started_clears_errors_and_preserves_transcript_rows() -> None:
+    connection = RecordingConnection(row=None)
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DIARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=ErrorKind.UNKNOWN,
+        error_message="stale diarization failure",
+        failed_at_stage=MeetingStatus.DIARIZING,
+    )
+
+    queue.mark_diarization_started(meeting)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert len(statements) == 1
+    sql, params = statements[0]
+    assert "status = 'diarizing'" in sql
+    assert "error_kind = null" in sql
+    assert "error_message = null" in sql
+    assert "failed_at_stage = null" in sql
+    assert "where id = %(meeting_id)s and status = 'diarizing'" in sql
+    assert "delete from transcript_segments" not in sql
+    assert params == {"meeting_id": meeting.id}
+
+
+def test_mark_diarization_succeeded_replaces_segments_and_marks_done() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1, 1, 1])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DIARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+    segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.5,
+            speaker_label="SPEAKER_00",
+            text="Hello world",
+        ),
+        TranscriptSegmentDraft(
+            start_seconds=1.5,
+            end_seconds=3.25,
+            speaker_label="SPEAKER_01",
+            text="Second speaker",
+        ),
+    ]
+
+    queue.mark_diarization_succeeded(meeting=meeting, segments=segments)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert statements[0] == (
+        "delete from transcript_segments where meeting_id = %(meeting_id)s",
+        {"meeting_id": meeting.id},
+    )
+    first_insert_sql, first_insert_params = statements[1]
+    assert first_insert_sql.startswith("insert into transcript_segments")
+    assert first_insert_params == {
+        "meeting_id": meeting.id,
+        "start_seconds": "0.000",
+        "end_seconds": "1.500",
+        "speaker_label": "SPEAKER_00",
+        "text": "Hello world",
+    }
+    update_sql, update_params = statements[-1]
+    assert "status = 'done'" in update_sql
+    assert "error_kind = null" in update_sql
+    assert "error_message = null" in update_sql
+    assert "failed_at_stage = null" in update_sql
+    assert "where id = %(meeting_id)s and status = 'diarizing'" in update_sql
+    assert update_params == {"meeting_id": meeting.id}
+
+
+def test_mark_transcription_succeeded_raises_when_final_status_update_misses() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1, 0])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.TRANSCRIBING,
+        resume_from_stage=None,
+        transcription_progress=95,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    with pytest.raises(RuntimeError, match="updated 0 rows"):
+        queue.mark_transcription_succeeded(
+            meeting=meeting,
+            segments=[
+                TranscriptSegmentDraft(
+                    start_seconds=0.0,
+                    end_seconds=1.0,
+                    speaker_label="SPEAKER_00",
+                    text="Hello world",
+                )
+            ],
+        )
+
+
+def test_mark_diarization_succeeded_raises_when_final_status_update_misses() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1, 0])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DIARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    with pytest.raises(RuntimeError, match="updated 0 rows"):
+        queue.mark_diarization_succeeded(
+            meeting=meeting,
+            segments=[
+                TranscriptSegmentDraft(
+                    start_seconds=0.0,
+                    end_seconds=1.0,
+                    speaker_label="SPEAKER_00",
+                    text="Hello world",
+                )
+            ],
+        )
+
+
+def test_mark_diarization_succeeded_rejects_empty_segments() -> None:
+    queue = PostgresMeetingQueue(lambda: RecordingConnection(row=None))
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DIARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    with pytest.raises(ValueError, match="at least one transcript segment"):
+        queue.mark_diarization_succeeded(meeting=meeting, segments=[])
 
 
 def test_mark_transcription_succeeded_rejects_empty_segments() -> None:
@@ -348,7 +558,7 @@ def test_later_stage_recovery_failure_message_names_current_vertical_slice() -> 
     }
 
 
-def test_real_postgres_transcription_success_replaces_segments_without_duplicates() -> None:
+def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
     database_url = os.getenv("WORKER_TEST_DATABASE_URL")
     if not database_url:
         pytest.skip(
@@ -415,7 +625,7 @@ def test_real_postgres_transcription_success_replaces_segments_without_duplicate
 
     try:
         queue = PostgresMeetingQueue(connection_factory)
-        meeting = QueuedMeeting(
+        transcribing_meeting = QueuedMeeting(
             id=row_id,
             status=MeetingStatus.TRANSCRIBING,
             resume_from_stage=None,
@@ -426,7 +636,7 @@ def test_real_postgres_transcription_success_replaces_segments_without_duplicate
         )
 
         queue.mark_transcription_succeeded(
-            meeting=meeting,
+            meeting=transcribing_meeting,
             segments=[
                 TranscriptSegmentDraft(
                     start_seconds=0.0,
@@ -443,7 +653,7 @@ def test_real_postgres_transcription_success_replaces_segments_without_duplicate
             connection.commit()
 
         queue.mark_transcription_succeeded(
-            meeting=meeting,
+            meeting=transcribing_meeting,
             segments=[
                 TranscriptSegmentDraft(
                     start_seconds=0.0,
@@ -460,9 +670,90 @@ def test_real_postgres_transcription_success_replaces_segments_without_duplicate
             ],
         )
 
+        diarizing_meeting = QueuedMeeting(
+            id=row_id,
+            status=MeetingStatus.DIARIZING,
+            resume_from_stage=None,
+            transcription_progress=100,
+            error_kind=None,
+            error_message=None,
+            failed_at_stage=None,
+        )
+        loaded_segments = queue.load_transcript_segments(diarizing_meeting)
+
+        assert loaded_segments == [
+            TranscriptSegmentDraft(
+                start_seconds=0.0,
+                end_seconds=1.0,
+                speaker_label="SPEAKER_00",
+                text="replacement one",
+            ),
+            TranscriptSegmentDraft(
+                start_seconds=1.0,
+                end_seconds=2.0,
+                speaker_label="SPEAKER_00",
+                text="replacement two",
+            ),
+        ]
+
+        with connection_factory() as connection:
+            connection.execute(
+                """
+                update meetings
+                set error_kind = 'unknown',
+                    error_message = 'stale error',
+                    failed_at_stage = 'diarizing'
+                where id = %s
+                """,
+                [row_id],
+            )
+            connection.commit()
+
+        queue.mark_diarization_started(diarizing_meeting)
+
+        with connection_factory() as connection:
+            started_segment_count = connection.execute(
+                "select count(*) from transcript_segments where meeting_id = %s",
+                [row_id],
+            ).fetchone()
+            started_meeting_row = connection.execute(
+                """
+                select status, transcription_progress, error_kind, error_message, failed_at_stage
+                from meetings
+                where id = %s
+                """,
+                [row_id],
+            ).fetchone()
+
+        assert started_segment_count == (2,)
+        assert started_meeting_row == ("diarizing", 100, None, None, None)
+
+        queue.mark_diarization_succeeded(
+            meeting=diarizing_meeting,
+            segments=[
+                TranscriptSegmentDraft(
+                    start_seconds=0.0,
+                    end_seconds=1.0,
+                    speaker_label="SPEAKER_01",
+                    text="replacement one",
+                ),
+                TranscriptSegmentDraft(
+                    start_seconds=1.0,
+                    end_seconds=2.0,
+                    speaker_label="SPEAKER_00",
+                    text="replacement two",
+                ),
+            ],
+        )
+
         with connection_factory() as connection:
             segment_rows = connection.execute(
-                "select text from transcript_segments where meeting_id = %s order by start_seconds",
+                """
+                select speaker_label, text
+                from transcript_segments
+                where meeting_id = %s
+                order by start_seconds
+                """,
                 [row_id],
             ).fetchall()
             meeting_row = connection.execute(
@@ -470,7 +761,10 @@ def test_real_postgres_transcription_success_replaces_segments_without_duplicate
                 [row_id],
             ).fetchone()
 
-        assert segment_rows == [("replacement one",), ("replacement two",)]
+        assert segment_rows == [
+            ("SPEAKER_01", "replacement one"),
+            ("SPEAKER_00", "replacement two"),
+        ]
         assert meeting_row == ("done", 100)
     finally:
         with psycopg.connect(database_url, autocommit=True) as admin:

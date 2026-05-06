@@ -47,6 +47,15 @@ class TranscriptSegmentDraft:
 
 
 @dataclass(frozen=True, slots=True)
+class DiarizationSegmentDraft:
+    """Worker-owned diarization interval payload before speaker assignment."""
+
+    start_seconds: float
+    end_seconds: float
+    speaker_label: str
+
+
+@dataclass(frozen=True, slots=True)
 class QueuedMeeting:
     """Queue/pipeline fields for a meeting row.
 

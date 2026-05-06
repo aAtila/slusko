@@ -14,6 +14,7 @@ import psycopg
 from slusko_worker.config import WorkerConfig, apply_hf_home_default, load_config
 from slusko_worker.db.models import MeetingStatus
 from slusko_worker.db.queue import PostgresMeetingQueue
+from slusko_worker.pipeline.diarization import PyannoteDiarizer
 from slusko_worker.pipeline.normalization import AudioNormalizer
 from slusko_worker.pipeline.runner import PipelineProcessor
 from slusko_worker.pipeline.transcription import WhisperTranscriber
@@ -91,10 +92,16 @@ def run() -> int:
         progress_min_delta=config.transcription_progress_min_delta,
         progress_min_interval_seconds=config.transcription_progress_min_interval_seconds,
     )
+    diarizer = PyannoteDiarizer(
+        model_name=config.pyannote_model,
+        hf_token=config.huggingface_token,
+        model_cache_dir=config.model_cache_dir,
+    )
     processor = PipelineProcessor(
         queue=queue,
         normalizer=AudioNormalizer(meetings_dir=config.meetings_dir),
         transcriber=transcriber,
+        diarizer=diarizer,
         meetings_dir=config.meetings_dir,
     )
     loop = QueueLoop(
@@ -116,6 +123,11 @@ def run() -> int:
         config.whisper_model,
         config.whisper_device,
         config.whisper_compute_type,
+    )
+    logger.info(
+        "pyannote configured with model=%s huggingface_token_present=%s",
+        config.pyannote_model,
+        bool(config.huggingface_token),
     )
     logger.info(
         "queue polling fallback configured at %.0f seconds",
