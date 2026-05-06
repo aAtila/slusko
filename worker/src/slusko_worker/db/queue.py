@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
-from slusko_worker.db.models import ErrorKind, MeetingStatus, QueuedMeeting
+from slusko_worker.db.models import (
+    ErrorKind,
+    MeetingStatus,
+    QueuedMeeting,
+    TranscriptSegmentDraft,
+)
 
 NON_TERMINAL_STATUSES: tuple[MeetingStatus, ...] = (
     MeetingStatus.PENDING,
@@ -84,18 +89,65 @@ where id = %(meeting_id)s
   and status in ('pending', 'normalizing')
 """
 
-MARK_NORMALIZATION_SUCCEEDED_SQL = """
+DELETE_TRANSCRIPT_SEGMENTS_SQL = """
+delete from transcript_segments
+where meeting_id = %(meeting_id)s
+"""
+
+MARK_TRANSCRIPTION_STARTED_SQL = """
 update meetings
 set
-  status = 'done',
-  duration_seconds = %(duration_seconds)s,
-  transcription_progress = null,
+  status = 'transcribing',
+  duration_seconds = coalesce(%(duration_seconds)s, duration_seconds),
+  transcription_progress = 0,
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
   updated_at = now()
 where id = %(meeting_id)s
-  and status = 'normalizing'
+  and status in ('normalizing', 'transcribing')
+"""
+
+MARK_TRANSCRIPTION_PROGRESS_SQL = """
+update meetings
+set
+  transcription_progress = %(progress)s,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'transcribing'
+  and (
+    transcription_progress is null
+    or transcription_progress < %(progress)s
+  )
+"""
+
+INSERT_TRANSCRIPT_SEGMENT_SQL = """
+insert into transcript_segments (
+  meeting_id,
+  start_seconds,
+  end_seconds,
+  speaker_label,
+  text
+) values (
+  %(meeting_id)s,
+  %(start_seconds)s,
+  %(end_seconds)s,
+  %(speaker_label)s,
+  %(text)s
+)
+"""
+
+MARK_TRANSCRIPTION_SUCCEEDED_SQL = """
+update meetings
+set
+  status = 'done',
+  transcription_progress = 100,
+  error_kind = null,
+  error_message = null,
+  failed_at_stage = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'transcribing'
 """
 
 MARK_FAILURE_SQL = """
@@ -154,15 +206,83 @@ class PostgresMeetingQueue:
             {"meeting_id": meeting.id},
         )
 
-    def mark_normalization_succeeded(
-        self, *, meeting: QueuedMeeting, duration_seconds: int
+    def mark_transcription_started(
+        self, *, meeting: QueuedMeeting, duration_seconds: int | None = None
     ) -> None:
-        """Finish the normalization-only vertical slice with persisted duration."""
+        """Enter transcription and clear stale transcript rows for idempotent re-entry."""
 
-        self._execute(
-            MARK_NORMALIZATION_SUCCEEDED_SQL,
-            {"meeting_id": meeting.id, "duration_seconds": duration_seconds},
-        )
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        DELETE_TRANSCRIPT_SEGMENTS_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+                    cursor.execute(
+                        MARK_TRANSCRIPTION_STARTED_SQL,
+                        {
+                            "meeting_id": meeting.id,
+                            "duration_seconds": duration_seconds,
+                        },
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError(
+                            f"meeting status write updated {cursor.rowcount} rows"
+                        )
+
+    def mark_transcription_progress(
+        self, *, meeting: QueuedMeeting, progress: int
+    ) -> None:
+        """Persist non-terminal transcription progress, ignoring stale writes."""
+
+        if progress < 0 or progress > 99:
+            raise ValueError("progress must be between 0 and 99")
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        MARK_TRANSCRIPTION_PROGRESS_SQL,
+                        {"meeting_id": meeting.id, "progress": progress},
+                    )
+
+    def mark_transcription_succeeded(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        segments: Sequence[TranscriptSegmentDraft],
+    ) -> None:
+        """Replace transcript rows and finish the transcription vertical slice."""
+
+        if not segments:
+            raise ValueError("at least one transcript segment is required")
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        DELETE_TRANSCRIPT_SEGMENTS_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+                    for segment in segments:
+                        cursor.execute(
+                            INSERT_TRANSCRIPT_SEGMENT_SQL,
+                            {
+                                "meeting_id": meeting.id,
+                                "start_seconds": f"{segment.start_seconds:.3f}",
+                                "end_seconds": f"{segment.end_seconds:.3f}",
+                                "speaker_label": segment.speaker_label,
+                                "text": segment.text,
+                            },
+                        )
+                    cursor.execute(
+                        MARK_TRANSCRIPTION_SUCCEEDED_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError(
+                            f"meeting status write updated {cursor.rowcount} rows"
+                        )
 
     def mark_recovery_not_implemented(self, meeting: QueuedMeeting) -> None:
         """Terminal-error a claimed later-stage row at a safe boundary for this slice."""
@@ -243,11 +363,11 @@ def _failed_stage_for_stub(status: MeetingStatus) -> MeetingStatus:
 def _recovery_stub_message(status: MeetingStatus, failed_stage: MeetingStatus) -> str:
     if status in (MeetingStatus.PENDING, MeetingStatus.NORMALIZING):
         return (
-            "Worker queue claim succeeded, but normalization is only implemented for "
-            "this issue #7 normalization-only slice. A later worker item must resume "
-            "from normalizing."
+            "Worker queue claim succeeded, but normalization/transcription is only "
+            "implemented for this issue #8 transcription slice. A later worker item "
+            "must resume from normalizing."
         )
     return (
         f"Worker recovered a meeting at {status.value!r}, but recovery beyond "
-        f"{failed_stage.value!r} is not implemented in this issue #7 normalization-only slice."
+        f"{failed_stage.value!r} is not implemented in this issue #8 transcription slice."
     )

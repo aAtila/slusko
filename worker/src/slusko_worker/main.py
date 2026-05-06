@@ -16,6 +16,7 @@ from slusko_worker.db.models import MeetingStatus
 from slusko_worker.db.queue import PostgresMeetingQueue
 from slusko_worker.pipeline.normalization import AudioNormalizer
 from slusko_worker.pipeline.runner import PipelineProcessor
+from slusko_worker.pipeline.transcription import WhisperTranscriber
 from slusko_worker.queue_loop import QueueLoop, listener_connection_factory
 
 LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
@@ -82,9 +83,19 @@ def run() -> int:
     queue = PostgresMeetingQueue.from_database_url(
         config.database_url, connect_kwargs=config.database_connect_kwargs
     )
+    transcriber = WhisperTranscriber(
+        whisper_model=config.whisper_model,
+        whisper_device=config.whisper_device,
+        whisper_compute_type=config.whisper_compute_type,
+        model_cache_dir=config.model_cache_dir,
+        progress_min_delta=config.transcription_progress_min_delta,
+        progress_min_interval_seconds=config.transcription_progress_min_interval_seconds,
+    )
     processor = PipelineProcessor(
         queue=queue,
         normalizer=AudioNormalizer(meetings_dir=config.meetings_dir),
+        transcriber=transcriber,
+        meetings_dir=config.meetings_dir,
     )
     loop = QueueLoop(
         listener_factory=listener_connection_factory(config),
@@ -100,6 +111,12 @@ def run() -> int:
     )
     logger.info("meetings directory configured at %s", config.meetings_dir)
     logger.info("model cache directory configured at %s", config.model_cache_dir)
+    logger.info(
+        "whisper configured with model=%s device=%s compute_type=%s",
+        config.whisper_model,
+        config.whisper_device,
+        config.whisper_compute_type,
+    )
     logger.info(
         "queue polling fallback configured at %.0f seconds",
         config.poll_interval_seconds,

@@ -1,7 +1,17 @@
-import { desc, eq } from "drizzle-orm";
-import { meetings, type ErrorKind, type MeetingStatus } from "~/db/schema";
+import { asc, desc, eq } from "drizzle-orm";
+import {
+  meetings,
+  transcriptSegments,
+  type ErrorKind,
+  type MeetingStatus,
+} from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
-import type { HomeMeetingListItem, MeetingDetail } from "./meetings-list";
+import type {
+  HomeMeetingListItem,
+  MeetingDetail,
+  MeetingDetailRouteData,
+  TranscriptSegment,
+} from "./meetings-list";
 
 export type HomeMeetingListRow = {
   id: string;
@@ -19,8 +29,13 @@ export type MeetingDetailRow = HomeMeetingListRow & {
   updatedAt: Date;
 };
 
+export type TranscriptSegmentRow = TranscriptSegment;
+
 type MeetingDetailLoaderOptions = {
   findMeetingById?: (meetingId: string) => Promise<MeetingDetailRow | null>;
+  findTranscriptSegmentsByMeetingId?: (
+    meetingId: string,
+  ) => Promise<TranscriptSegmentRow[]>;
 };
 
 export async function loadHomeMeetings(): Promise<HomeMeetingListItem[]> {
@@ -54,7 +69,7 @@ export async function loadMeetingDetail(
 export async function loadMeetingDetailRouteData(
   meetingId: string | undefined,
   options: MeetingDetailLoaderOptions = {},
-) {
+): Promise<MeetingDetailRouteData> {
   if (!isMeetingId(meetingId)) {
     throw new Response("Meeting not found", { status: 404 });
   }
@@ -65,7 +80,15 @@ export async function loadMeetingDetailRouteData(
     throw new Response("Meeting not found", { status: 404 });
   }
 
-  return { meeting };
+  const transcriptSegments = await (
+    options.findTranscriptSegmentsByMeetingId ??
+    findTranscriptSegmentsByMeetingId
+  )(meeting.id);
+
+  return {
+    meeting,
+    transcriptSegments: transcriptSegments.map(serializeTranscriptSegmentRow),
+  };
 }
 
 async function findMeetingDetailRow(
@@ -107,6 +130,39 @@ function serializeMeetingDetailRow(row: MeetingDetailRow): MeetingDetail {
     failedAtStage: row.failedAtStage,
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function serializeTranscriptSegmentRow(
+  row: TranscriptSegmentRow,
+): TranscriptSegment {
+  return {
+    id: row.id,
+    startSeconds: row.startSeconds,
+    endSeconds: row.endSeconds,
+    speakerLabel: row.speakerLabel,
+    text: row.text,
+  };
+}
+
+async function findTranscriptSegmentsByMeetingId(
+  meetingId: string,
+): Promise<TranscriptSegmentRow[]> {
+  const database = await getDatabase();
+
+  return database
+    .select({
+      id: transcriptSegments.id,
+      startSeconds: transcriptSegments.startSeconds,
+      endSeconds: transcriptSegments.endSeconds,
+      speakerLabel: transcriptSegments.speakerLabel,
+      text: transcriptSegments.text,
+    })
+    .from(transcriptSegments)
+    .where(eq(transcriptSegments.meetingId, meetingId))
+    .orderBy(
+      asc(transcriptSegments.startSeconds),
+      asc(transcriptSegments.endSeconds),
+    );
 }
 
 async function getDatabase() {

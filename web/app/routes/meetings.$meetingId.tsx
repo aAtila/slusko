@@ -12,10 +12,12 @@ import type { MeetingStatus } from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import {
   formatDuration,
+  formatTranscriptTimestamp,
   getMeetingStatusPresentation,
   isTerminalMeetingStatus,
   type MeetingDetail,
   type MeetingStatusTone,
+  type TranscriptSegment,
 } from "~/lib/meetings-list";
 import type { Route } from "./+types/meetings.$meetingId";
 
@@ -60,7 +62,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 export default function MeetingDetailPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { meeting } = loaderData;
+  const { meeting, transcriptSegments } = loaderData;
   const actionData = useActionData<MeetingActionData>();
   const navigation = useNavigation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -250,9 +252,9 @@ export default function MeetingDetailPage({
             description="Meeting summaries will appear here after the summarization pipeline is connected."
             title="Summary"
           />
-          <PlaceholderPanel
-            description="Transcript text and speaker labels will appear here after transcript loading is connected."
-            title="Transcript"
+          <TranscriptPanel
+            segments={transcriptSegments}
+            status={meeting.status}
           />
         </section>
 
@@ -337,6 +339,48 @@ function PlaceholderPanel({
     <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
       <h2 className="text-2xl font-semibold text-white">{title}</h2>
       <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>
+    </article>
+  );
+}
+
+export function TranscriptPanel({
+  segments,
+  status,
+}: {
+  segments: TranscriptSegment[];
+  status: MeetingStatus;
+}) {
+  let emptyMessage = "Transcript will appear here when transcription finishes.";
+
+  if (status === "error") {
+    emptyMessage = "No transcript was saved before processing failed.";
+  } else if (status === "done") {
+    emptyMessage = "Transcript is not available for this meeting.";
+  }
+
+  return (
+    <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
+      <h2 className="text-2xl font-semibold text-white">Transcript</h2>
+      {segments.length === 0 ? (
+        <p className="mt-3 text-sm leading-6 text-slate-300">{emptyMessage}</p>
+      ) : (
+        <ol className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
+          {segments.map((segment) => (
+            <li
+              className="rounded-2xl border border-white/10 bg-slate-950/60 p-3"
+              key={segment.id}
+            >
+              <p className="text-xs font-semibold tracking-wide text-cyan-200">
+                <time>[{formatTranscriptTimestamp(segment.startSeconds)}]</time>{" "}
+                {segment.speakerLabel}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-100">
+                {segment.text}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
     </article>
   );
 }

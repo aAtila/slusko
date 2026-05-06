@@ -12,6 +12,11 @@ class WorkerConfig:
     meetings_dir: str = "/data/meetings"
     model_cache_dir: str = "/data/models"
     hf_home: str = "/data/models"
+    whisper_model: str = "large-v3"
+    whisper_device: str = "auto"
+    whisper_compute_type: str = "auto"
+    transcription_progress_min_delta: int = 5
+    transcription_progress_min_interval_seconds: float = 5.0
     poll_interval_seconds: float = 300
     connect_timeout_seconds: int = 5
     tcp_keepalives: int = 1
@@ -57,6 +62,15 @@ def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
         meetings_dir=env.get("MEETINGS_DIR", "/data/meetings"),
         model_cache_dir=model_cache_dir,
         hf_home=env.get("HF_HOME", model_cache_dir),
+        whisper_model=env.get("WHISPER_MODEL", "large-v3"),
+        whisper_device=env.get("WHISPER_DEVICE", "auto"),
+        whisper_compute_type=env.get("WHISPER_COMPUTE_TYPE", "auto"),
+        transcription_progress_min_delta=_positive_int(
+            env.get("TRANSCRIPTION_PROGRESS_MIN_DELTA"), default=5
+        ),
+        transcription_progress_min_interval_seconds=_non_negative_float(
+            env.get("TRANSCRIPTION_PROGRESS_MIN_INTERVAL_SECONDS"), default=5.0
+        ),
         poll_interval_seconds=float(env.get("QUEUE_POLL_INTERVAL_SECONDS", "300")),
         connect_timeout_seconds=int(env.get("DATABASE_CONNECT_TIMEOUT_SECONDS", "5")),
         tcp_keepalives=int(env.get("DATABASE_TCP_KEEPALIVES", "1")),
@@ -64,3 +78,27 @@ def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
         tcp_keepalives_interval=int(env.get("DATABASE_TCP_KEEPALIVES_INTERVAL", "30")),
         tcp_keepalives_count=int(env.get("DATABASE_TCP_KEEPALIVES_COUNT", "5")),
     )
+
+
+def _positive_int(value: str | None, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _non_negative_float(value: str | None, *, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    if parsed < 0:
+        return default
+    return parsed

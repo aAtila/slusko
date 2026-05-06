@@ -3,6 +3,7 @@ import {
   loadMeetingDetail,
   loadMeetingDetailRouteData,
   type MeetingDetailRow,
+  type TranscriptSegmentRow,
 } from "./meetings-list.server";
 
 const meetingId = "00000000-0000-4000-8000-000000000007";
@@ -21,6 +22,19 @@ function detailRow(
     failedAtStage: "normalizing",
     createdAt: new Date("2026-05-05T10:00:00.000Z"),
     updatedAt: new Date("2026-05-05T10:02:00.000Z"),
+    ...overrides,
+  };
+}
+
+function transcriptSegmentRow(
+  overrides: Partial<TranscriptSegmentRow> = {},
+): TranscriptSegmentRow {
+  return {
+    id: "00000000-0000-4000-8000-00000000a001",
+    startSeconds: 12.4,
+    endSeconds: 15.9,
+    speakerLabel: "SPEAKER_00",
+    text: "Ship it.",
     ...overrides,
   };
 }
@@ -69,9 +83,58 @@ describe("meeting detail loader helpers", () => {
     expect(finderWasCalled).toBe(false);
   });
 
+  test("route data helper includes transcript segments", async () => {
+    const transcriptCalls: string[] = [];
+
+    const routeData = await loadMeetingDetailRouteData(meetingId, {
+      findMeetingById: async (id) => (id === meetingId ? detailRow() : null),
+      findTranscriptSegmentsByMeetingId: async (id) => {
+        transcriptCalls.push(id);
+        return [
+          transcriptSegmentRow({
+            id: "00000000-0000-4000-8000-00000000a002",
+            startSeconds: 0,
+            endSeconds: 1,
+            text: "Intro",
+          }),
+          transcriptSegmentRow(),
+        ];
+      },
+    });
+
+    expect(routeData.meeting.id).toBe(meetingId);
+    expect(routeData.transcriptSegments).toEqual([
+      {
+        id: "00000000-0000-4000-8000-00000000a002",
+        startSeconds: 0,
+        endSeconds: 1,
+        speakerLabel: "SPEAKER_00",
+        text: "Intro",
+      },
+      {
+        id: "00000000-0000-4000-8000-00000000a001",
+        startSeconds: 12.4,
+        endSeconds: 15.9,
+        speakerLabel: "SPEAKER_00",
+        text: "Ship it.",
+      },
+    ]);
+    expect(transcriptCalls).toEqual([meetingId]);
+  });
+
+  test("route data helper returns an empty transcript when no segments exist", async () => {
+    const routeData = await loadMeetingDetailRouteData(meetingId, {
+      findMeetingById: async () => detailRow(),
+      findTranscriptSegmentsByMeetingId: async () => [],
+    });
+
+    expect(routeData.transcriptSegments).toEqual([]);
+  });
+
   test("route data helper throws a 404 response for an unknown meeting", async () => {
     const missingMeetingId = "00000000-0000-4000-8000-000000000404";
     const finderCalls: string[] = [];
+    let transcriptFinderWasCalled = false;
 
     const error = await captureThrownResponse(
       loadMeetingDetailRouteData(missingMeetingId, {
@@ -79,11 +142,16 @@ describe("meeting detail loader helpers", () => {
           finderCalls.push(id);
           return null;
         },
+        findTranscriptSegmentsByMeetingId: async () => {
+          transcriptFinderWasCalled = true;
+          return [];
+        },
       }),
     );
 
     expect(error.status).toBe(404);
     expect(finderCalls).toEqual([missingMeetingId]);
+    expect(transcriptFinderWasCalled).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { HomeMeetingListItem } from "./meetings-list";
 import {
   formatDuration,
+  formatTranscriptTimestamp,
   getMeetingStatusPresentation,
   shouldPollMeetings,
 } from "./meetings-list";
@@ -90,6 +91,12 @@ describe("meeting list status helpers", () => {
     expect(formatDuration(9)).toBe("9s");
     expect(formatDuration(75)).toBe("1m 15s");
     expect(formatDuration(3_905)).toBe("1h 5m");
+  });
+
+  test("formats transcript timestamps for sub-hour and hour values", () => {
+    expect(formatTranscriptTimestamp(0)).toBe("0:00");
+    expect(formatTranscriptTimestamp(75.9)).toBe("1:15");
+    expect(formatTranscriptTimestamp(3_905)).toBe("1:05:05");
   });
 
   test("presents transcription progress only while transcribing", () => {

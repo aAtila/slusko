@@ -40,3 +40,32 @@ class NormalizationFailed(PipelineError):
             error_message=str(self),
             failed_at_stage=MeetingStatus.NORMALIZING,
         )
+
+
+class TranscriptionFailed(PipelineError):
+    """Transcription stage failed before producing usable transcript segments."""
+
+    def to_failure(self) -> PipelineFailure:
+        return PipelineFailure(
+            error_kind=ErrorKind.TRANSCRIPTION_FAILED,
+            error_message=str(self),
+            failed_at_stage=MeetingStatus.TRANSCRIBING,
+        )
+
+
+class TranscriptionEmpty(PipelineError):
+    """Whisper completed, but ADR-0007 says the transcript has no speech."""
+
+    DEFAULT_MESSAGE = (
+        "No speech detected. The recording may be silent, music-only, or corrupted."
+    )
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.DEFAULT_MESSAGE)
+
+    def to_failure(self) -> PipelineFailure:
+        return PipelineFailure(
+            error_kind=ErrorKind.TRANSCRIPTION_EMPTY,
+            error_message=str(self),
+            failed_at_stage=MeetingStatus.TRANSCRIBING,
+        )

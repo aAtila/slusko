@@ -37,6 +37,16 @@ class ErrorKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptSegmentDraft:
+    """Worker-owned transcript segment payload before DB persistence."""
+
+    start_seconds: float
+    end_seconds: float
+    speaker_label: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class QueuedMeeting:
     """Queue/pipeline fields for a meeting row.
 

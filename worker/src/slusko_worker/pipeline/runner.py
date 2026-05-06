@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Protocol
 
-from slusko_worker.db.models import ErrorKind, MeetingStatus, QueuedMeeting
+from slusko_worker.db.models import (
+    ErrorKind,
+    MeetingStatus,
+    QueuedMeeting,
+    TranscriptSegmentDraft,
+)
 from slusko_worker.pipeline.errors import PipelineError
+from slusko_worker.pipeline.normalization import NORMALIZED_FILENAME
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +23,19 @@ class RecoveryQueue(Protocol):
     def mark_recovery_not_implemented(self, meeting: QueuedMeeting) -> None: ...
 
 
-class NormalizationQueue(RecoveryQueue, Protocol):
+class TranscriptionQueue(RecoveryQueue, Protocol):
     def mark_normalization_started(self, meeting: QueuedMeeting) -> None: ...
 
-    def mark_normalization_succeeded(
-        self, *, meeting: QueuedMeeting, duration_seconds: int
+    def mark_transcription_started(
+        self, *, meeting: QueuedMeeting, duration_seconds: int | None = None
+    ) -> None: ...
+
+    def mark_transcription_progress(
+        self, *, meeting: QueuedMeeting, progress: int
+    ) -> None: ...
+
+    def mark_transcription_succeeded(
+        self, *, meeting: QueuedMeeting, segments: Sequence[TranscriptSegmentDraft]
     ) -> None: ...
 
     def mark_failure(
@@ -34,72 +50,156 @@ class NormalizationQueue(RecoveryQueue, Protocol):
 
 class NormalizationResult(Protocol):
     duration_seconds: int
+    normalized_path: Path
 
 
 class Normalizer(Protocol):
     def normalize(self, meeting: QueuedMeeting) -> NormalizationResult: ...
 
 
+class Transcriber(Protocol):
+    def transcribe(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        normalized_path: Path,
+        progress: Callable[[int], None],
+    ) -> Sequence[TranscriptSegmentDraft]: ...
+
+
 class PipelineProcessor:
     """Dispatch claimed meetings to the currently implemented pipeline stages."""
 
-    def __init__(self, *, queue: NormalizationQueue, normalizer: Normalizer) -> None:
+    def __init__(
+        self,
+        *,
+        queue: TranscriptionQueue,
+        normalizer: Normalizer,
+        transcriber: Transcriber,
+        meetings_dir: str | Path,
+    ) -> None:
         self._queue = queue
         self._normalizer = normalizer
+        self._transcriber = transcriber
+        self._meetings_dir = Path(meetings_dir)
 
     def process(self, meeting: QueuedMeeting) -> None:
         if meeting.status in {MeetingStatus.PENDING, MeetingStatus.NORMALIZING}:
-            self._queue.mark_normalization_started(meeting)
-            try:
-                result = self._normalizer.normalize(meeting)
-            except PipelineError as error:
-                failure = error.to_failure()
-                self._queue.mark_failure(
-                    meeting=meeting,
-                    error_kind=failure.error_kind,
-                    error_message=failure.error_message,
-                    failed_at_stage=failure.failed_at_stage,
-                )
-                return
-            except Exception as error:
-                logger.exception(
-                    "unexpected normalization failure for meeting %s", meeting.id
-                )
-                self._queue.mark_failure(
-                    meeting=meeting,
-                    error_kind=ErrorKind.UNKNOWN,
-                    error_message=str(error) or error.__class__.__name__,
-                    failed_at_stage=MeetingStatus.NORMALIZING,
-                )
-                return
-            self._queue.mark_normalization_succeeded(
+            self._process_from_normalization(meeting)
+            return
+
+        if meeting.status == MeetingStatus.TRANSCRIBING:
+            normalized_path = self._meetings_dir / str(meeting.id) / NORMALIZED_FILENAME
+            self._process_transcription(
                 meeting=meeting,
-                duration_seconds=result.duration_seconds,
+                normalized_path=normalized_path,
+                duration_seconds=None,
             )
             return
 
         logger.warning(
-            "meeting %s claimed at %s, but recovery beyond normalization is not implemented",
+            "meeting %s claimed at %s, but recovery beyond transcription is not implemented",
             meeting.id,
             meeting.status.value,
         )
         self._queue.mark_recovery_not_implemented(meeting)
 
+    def _process_from_normalization(self, meeting: QueuedMeeting) -> None:
+        self._queue.mark_normalization_started(meeting)
+        try:
+            result = self._normalizer.normalize(meeting)
+        except PipelineError as error:
+            self._write_pipeline_failure(meeting, error)
+            return
+        except Exception as error:
+            logger.exception("unexpected normalization failure for meeting %s", meeting.id)
+            self._queue.mark_failure(
+                meeting=meeting,
+                error_kind=ErrorKind.UNKNOWN,
+                error_message=str(error) or error.__class__.__name__,
+                failed_at_stage=MeetingStatus.NORMALIZING,
+            )
+            return
+
+        self._process_transcription(
+            meeting=meeting,
+            normalized_path=result.normalized_path,
+            duration_seconds=result.duration_seconds,
+        )
+
+    def _process_transcription(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        normalized_path: Path,
+        duration_seconds: int | None,
+    ) -> None:
+        self._queue.mark_transcription_started(
+            meeting=meeting, duration_seconds=duration_seconds
+        )
+        try:
+            segments = self._transcriber.transcribe(
+                meeting=meeting,
+                normalized_path=normalized_path,
+                progress=lambda progress: self._safe_mark_transcription_progress(
+                    meeting=meeting, progress=progress
+                ),
+            )
+        except PipelineError as error:
+            self._write_pipeline_failure(meeting, error)
+            return
+        except Exception as error:
+            logger.exception("unexpected transcription failure for meeting %s", meeting.id)
+            self._queue.mark_failure(
+                meeting=meeting,
+                error_kind=ErrorKind.UNKNOWN,
+                error_message=str(error) or error.__class__.__name__,
+                failed_at_stage=MeetingStatus.TRANSCRIBING,
+            )
+            return
+
+        self._queue.mark_transcription_succeeded(meeting=meeting, segments=segments)
+
+    def _safe_mark_transcription_progress(
+        self, *, meeting: QueuedMeeting, progress: int
+    ) -> None:
+        try:
+            self._queue.mark_transcription_progress(meeting=meeting, progress=progress)
+        except Exception:
+            logger.exception(
+                "transcription progress write failed for meeting %s", meeting.id
+            )
+
+    def _write_pipeline_failure(
+        self, meeting: QueuedMeeting, error: PipelineError
+    ) -> None:
+        failure = error.to_failure()
+        self._queue.mark_failure(
+            meeting=meeting,
+            error_kind=failure.error_kind,
+            error_message=failure.error_message,
+            failed_at_stage=failure.failed_at_stage,
+        )
+
 
 class RecoveryStubProcessor:
-    """Boundary processor retained for tests/compatibility with the issue #7 normalization-only slice."""
+    """Boundary processor retained for tests/compatibility with future slices."""
 
     def __init__(self, queue: RecoveryQueue) -> None:
         self._queue = queue
 
     def process(self, meeting: QueuedMeeting) -> None:
-        if meeting.status in {MeetingStatus.PENDING, MeetingStatus.NORMALIZING}:
+        if meeting.status in {
+            MeetingStatus.PENDING,
+            MeetingStatus.NORMALIZING,
+            MeetingStatus.TRANSCRIBING,
+        }:
             raise RuntimeError(
-                "RecoveryStubProcessor must not process pending/normalizing meetings"
+                "RecoveryStubProcessor must not process pending/normalizing/transcribing meetings"
             )
 
         logger.warning(
-            "meeting %s claimed at %s, but recovery beyond normalization is not implemented",
+            "meeting %s claimed at %s, but recovery beyond transcription is not implemented",
             meeting.id,
             meeting.status.value,
         )

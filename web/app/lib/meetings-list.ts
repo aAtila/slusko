@@ -16,6 +16,19 @@ export type MeetingDetail = HomeMeetingListItem & {
   updatedAt: string;
 };
 
+export type TranscriptSegment = {
+  id: string;
+  startSeconds: number;
+  endSeconds: number;
+  speakerLabel: string;
+  text: string;
+};
+
+export type MeetingDetailRouteData = {
+  meeting: MeetingDetail;
+  transcriptSegments: TranscriptSegment[];
+};
+
 export type MeetingStatusTone = "active" | "danger" | "queued" | "success";
 
 export type MeetingStatusPresentation = {
@@ -46,6 +59,21 @@ export function formatDuration(seconds: number) {
   }
 
   return `${remainingSeconds}s`;
+}
+
+export function formatTranscriptTimestamp(seconds: number) {
+  const safeSeconds = Number.isFinite(seconds)
+    ? Math.max(0, Math.floor(seconds))
+    : 0;
+  const hours = Math.floor(safeSeconds / 3_600);
+  const minutes = Math.floor((safeSeconds % 3_600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
 export function getMeetingStatusPresentation({

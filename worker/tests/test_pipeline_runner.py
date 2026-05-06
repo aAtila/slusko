@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
 
-from slusko_worker.db.models import ErrorKind, MeetingStatus, QueuedMeeting
-from slusko_worker.pipeline.errors import NormalizationFailed
+from slusko_worker.db.models import (
+    ErrorKind,
+    MeetingStatus,
+    QueuedMeeting,
+    TranscriptSegmentDraft,
+)
+from slusko_worker.pipeline.errors import (
+    NormalizationFailed,
+    TranscriptionEmpty,
+    TranscriptionFailed,
+)
 from slusko_worker.pipeline.runner import PipelineProcessor
 
 
@@ -26,19 +36,33 @@ def queued_meeting(status: MeetingStatus = MeetingStatus.PENDING) -> QueuedMeeti
 @dataclass(frozen=True)
 class FakeNormalizationResult:
     duration_seconds: int
+    normalized_path: Path = Path("/meetings/normalized.wav")
 
 
 class FakeQueue:
-    def __init__(self) -> None:
+    def __init__(self, *, progress_error: Exception | None = None) -> None:
         self.events: list[object] = []
+        self.progress_error = progress_error
 
     def mark_normalization_started(self, meeting: QueuedMeeting) -> None:
         self.events.append(("normalization_started", meeting.id))
 
-    def mark_normalization_succeeded(
-        self, *, meeting: QueuedMeeting, duration_seconds: int
+    def mark_transcription_started(
+        self, *, meeting: QueuedMeeting, duration_seconds: int | None = None
     ) -> None:
-        self.events.append(("normalization_succeeded", meeting.id, duration_seconds))
+        self.events.append(("transcription_started", meeting.id, duration_seconds))
+
+    def mark_transcription_progress(
+        self, *, meeting: QueuedMeeting, progress: int
+    ) -> None:
+        self.events.append(("transcription_progress", meeting.id, progress))
+        if self.progress_error is not None:
+            raise self.progress_error
+
+    def mark_transcription_succeeded(
+        self, *, meeting: QueuedMeeting, segments: list[TranscriptSegmentDraft]
+    ) -> None:
+        self.events.append(("transcription_succeeded", meeting.id, segments))
 
     def mark_failure(
         self,
@@ -79,27 +103,131 @@ class FakeNormalizer:
         return self.result
 
 
-def test_pending_meeting_runs_normalization_and_finishes_this_vertical_slice() -> None:
+class FakeTranscriber:
+    def __init__(
+        self,
+        segments: list[TranscriptSegmentDraft] | None = None,
+        error: Exception | None = None,
+        progress_updates: list[int] | None = None,
+        shared_events: list[object] | None = None,
+    ) -> None:
+        self.segments = segments or [
+            TranscriptSegmentDraft(
+                start_seconds=0.0,
+                end_seconds=1.0,
+                speaker_label="SPEAKER_00",
+                text="Hello from transcription",
+            )
+        ]
+        self.error = error
+        self.progress_updates = progress_updates or []
+        self.events: list[object] = []
+        self.shared_events = shared_events
+
+    def transcribe(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        normalized_path: Path,
+        progress: object,
+    ) -> list[TranscriptSegmentDraft]:
+        event = ("transcribe", meeting.id, normalized_path)
+        self.events.append(event)
+        if self.shared_events is not None:
+            self.shared_events.append(event)
+        for update in self.progress_updates:
+            progress(update)  # type: ignore[operator]
+        if self.error is not None:
+            raise self.error
+        return self.segments
+
+
+def make_processor(
+    *,
+    queue: FakeQueue,
+    normalizer: FakeNormalizer | None = None,
+    transcriber: FakeTranscriber | None = None,
+    meetings_dir: str | Path = "/meetings",
+) -> PipelineProcessor:
+    return PipelineProcessor(
+        queue=queue,
+        normalizer=normalizer or FakeNormalizer(FakeNormalizationResult(42)),
+        transcriber=transcriber or FakeTranscriber(shared_events=queue.events),
+        meetings_dir=meetings_dir,
+    )
+
+
+def test_pending_meeting_normalizes_then_transcribes_and_finishes_this_vertical_slice() -> None:
     queue = FakeQueue()
     normalizer = FakeNormalizer(
-        FakeNormalizationResult(duration_seconds=42), shared_events=queue.events
+        FakeNormalizationResult(duration_seconds=42, normalized_path=Path("/tmp/normalized.wav")),
+        shared_events=queue.events,
     )
-    processor = PipelineProcessor(queue=queue, normalizer=normalizer)
+    segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.5,
+            speaker_label="SPEAKER_00",
+            text="Hello world",
+        )
+    ]
+    transcriber = FakeTranscriber(
+        segments=segments, progress_updates=[25], shared_events=queue.events
+    )
+    processor = make_processor(queue=queue, normalizer=normalizer, transcriber=transcriber)
 
     processor.process(queued_meeting(MeetingStatus.PENDING))
 
     assert queue.events == [
         ("normalization_started", MEETING_ID),
         ("normalize", MEETING_ID),
-        ("normalization_succeeded", MEETING_ID, 42),
+        ("transcription_started", MEETING_ID, 42),
+        ("transcribe", MEETING_ID, Path("/tmp/normalized.wav")),
+        ("transcription_progress", MEETING_ID, 25),
+        ("transcription_succeeded", MEETING_ID, segments),
     ]
     assert normalizer.events == [("normalize", MEETING_ID)]
+
+
+def test_transcribing_reentry_skips_normalization_and_reuses_normalized_artifact_path() -> None:
+    queue = FakeQueue()
+    normalizer = FakeNormalizer(FakeNormalizationResult(duration_seconds=42))
+    transcriber = FakeTranscriber(shared_events=queue.events)
+    processor = make_processor(
+        queue=queue,
+        normalizer=normalizer,
+        transcriber=transcriber,
+        meetings_dir="/data/meetings",
+    )
+
+    processor.process(queued_meeting(MeetingStatus.TRANSCRIBING))
+
+    assert normalizer.events == []
+    assert transcriber.events == [
+        (
+            "transcribe",
+            MEETING_ID,
+            Path("/data/meetings") / str(MEETING_ID) / "normalized.wav",
+        )
+    ]
+    assert queue.events[0] == ("transcription_started", MEETING_ID, None)
+    assert queue.events[-1][0] == "transcription_succeeded"
+
+
+def test_progress_write_failures_do_not_abort_successful_transcription() -> None:
+    queue = FakeQueue(progress_error=RuntimeError("temporary database blip"))
+    transcriber = FakeTranscriber(progress_updates=[10], shared_events=queue.events)
+    processor = make_processor(queue=queue, transcriber=transcriber)
+
+    processor.process(queued_meeting(MeetingStatus.PENDING))
+
+    assert queue.events[-1][0] == "transcription_succeeded"
 
 
 def test_unexpected_normalization_error_writes_unknown_failure() -> None:
     queue = FakeQueue()
     normalizer = FakeNormalizer(error=OSError("filesystem refused rename"))
-    processor = PipelineProcessor(queue=queue, normalizer=normalizer)
+    processor = make_processor(queue=queue, normalizer=normalizer)
 
     processor.process(queued_meeting(MeetingStatus.NORMALIZING))
 
@@ -120,7 +248,7 @@ def test_normalization_failure_writes_adr_0007_error_fields() -> None:
     normalizer = FakeNormalizer(
         error=NormalizationFailed("ffmpeg failed: corrupt input")
     )
-    processor = PipelineProcessor(queue=queue, normalizer=normalizer)
+    processor = make_processor(queue=queue, normalizer=normalizer)
 
     processor.process(queued_meeting(MeetingStatus.NORMALIZING))
 
@@ -134,3 +262,60 @@ def test_normalization_failure_writes_adr_0007_error_fields() -> None:
             MeetingStatus.NORMALIZING,
         ),
     ]
+
+
+def test_transcription_failure_writes_adr_0007_error_fields() -> None:
+    queue = FakeQueue()
+    transcriber = FakeTranscriber(error=TranscriptionFailed("whisper crashed"))
+    processor = make_processor(queue=queue, transcriber=transcriber)
+
+    processor.process(queued_meeting(MeetingStatus.PENDING))
+
+    assert queue.events[-1] == (
+        "failure",
+        MEETING_ID,
+        ErrorKind.TRANSCRIPTION_FAILED,
+        "whisper crashed",
+        MeetingStatus.TRANSCRIBING,
+    )
+
+
+def test_empty_transcription_writes_distinct_non_retryable_failure() -> None:
+    queue = FakeQueue()
+    transcriber = FakeTranscriber(error=TranscriptionEmpty())
+    processor = make_processor(queue=queue, transcriber=transcriber)
+
+    processor.process(queued_meeting(MeetingStatus.PENDING))
+
+    assert queue.events[-1] == (
+        "failure",
+        MEETING_ID,
+        ErrorKind.TRANSCRIPTION_EMPTY,
+        "No speech detected. The recording may be silent, music-only, or corrupted.",
+        MeetingStatus.TRANSCRIBING,
+    )
+
+
+def test_unexpected_transcription_error_writes_unknown_failure_at_transcribing() -> None:
+    queue = FakeQueue()
+    transcriber = FakeTranscriber(error=RuntimeError("ctranslate exploded"))
+    processor = make_processor(queue=queue, transcriber=transcriber)
+
+    processor.process(queued_meeting(MeetingStatus.PENDING))
+
+    assert queue.events[-1] == (
+        "failure",
+        MEETING_ID,
+        ErrorKind.UNKNOWN,
+        "ctranslate exploded",
+        MeetingStatus.TRANSCRIBING,
+    )
+
+
+def test_later_stage_recovery_still_uses_boundary_stub() -> None:
+    queue = FakeQueue()
+    processor = make_processor(queue=queue)
+
+    processor.process(queued_meeting(MeetingStatus.DIARIZING))
+
+    assert queue.events == [("recovery_not_implemented", MEETING_ID, MeetingStatus.DIARIZING)]

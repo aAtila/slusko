@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from slusko_worker.db.models import MeetingStatus, QueuedMeeting
+from slusko_worker.db.models import MeetingStatus, QueuedMeeting, TranscriptSegmentDraft
 from slusko_worker.db.queue import (
     CLAIM_NEXT_MEETING_SQL,
     NON_TERMINAL_STATUSES,
@@ -32,7 +32,7 @@ class RecordingTransaction:
 class RecordingCursor:
     def __init__(self, connection: RecordingConnection) -> None:
         self.connection = connection
-        self.rowcount = connection.rowcount
+        self.rowcount = connection.next_rowcount()
 
     def __enter__(self) -> RecordingCursor:
         self.connection.events.append("cursor_open")
@@ -44,6 +44,7 @@ class RecordingCursor:
     def execute(self, sql: str, params: object | None = None) -> None:
         self.connection.executed_sql = sql
         self.connection.executed_params = params
+        self.connection.executed_statements.append((sql, params))
         self.connection.events.append(("execute", self.connection.in_transaction))
 
     def fetchone(self) -> dict[str, object] | None:
@@ -52,13 +53,26 @@ class RecordingCursor:
 
 
 class RecordingConnection:
-    def __init__(self, row: dict[str, object] | None, *, rowcount: int = 1) -> None:
+    def __init__(
+        self,
+        row: dict[str, object] | None,
+        *,
+        rowcount: int = 1,
+        rowcounts: list[int] | None = None,
+    ) -> None:
         self.row = row
         self.rowcount = rowcount
+        self.rowcounts = rowcounts or []
         self.events: list[object] = []
         self.in_transaction = False
         self.executed_sql = ""
         self.executed_params: object | None = None
+        self.executed_statements: list[tuple[str, object | None]] = []
+
+    def next_rowcount(self) -> int:
+        if self.rowcounts:
+            return self.rowcounts.pop(0)
+        return self.rowcount
 
     def __enter__(self) -> RecordingConnection:
         self.events.append("connect")
@@ -152,7 +166,7 @@ def test_mark_normalization_started_clears_progress_and_error_fields() -> None:
     assert ("execute", True) in connection.events
 
 
-def test_mark_normalization_succeeded_persists_done_status_and_duration() -> None:
+def test_mark_transcription_started_enters_stage_with_duration_and_clears_stale_segments() -> None:
     connection = RecordingConnection(row=None)
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
@@ -161,23 +175,134 @@ def test_mark_normalization_succeeded_persists_done_status_and_duration() -> Non
         resume_from_stage=None,
         transcription_progress=None,
         error_kind=None,
+        error_message="old error",
+        failed_at_stage=MeetingStatus.TRANSCRIBING,
+    )
+
+    queue.mark_transcription_started(meeting=meeting, duration_seconds=42)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert len(statements) == 2
+    assert statements[0] == (
+        "delete from transcript_segments where meeting_id = %(meeting_id)s",
+        {"meeting_id": meeting.id},
+    )
+    update_sql, update_params = statements[1]
+    assert "status = 'transcribing'" in update_sql
+    assert "duration_seconds = coalesce(%(duration_seconds)s, duration_seconds)" in update_sql
+    assert "transcription_progress = 0" in update_sql
+    assert "error_kind = null" in update_sql
+    assert "error_message = null" in update_sql
+    assert "failed_at_stage = null" in update_sql
+    assert "where id = %(meeting_id)s and status in ('normalizing', 'transcribing')" in update_sql
+    assert update_params == {"meeting_id": meeting.id, "duration_seconds": 42}
+    assert connection.events.count(("execute", True)) == 2
+
+
+def test_mark_transcription_progress_persists_monotonic_non_terminal_progress() -> None:
+    connection = RecordingConnection(row=None, rowcount=0)
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.TRANSCRIBING,
+        resume_from_stage=None,
+        transcription_progress=10,
+        error_kind=None,
         error_message=None,
         failed_at_stage=None,
     )
 
-    queue.mark_normalization_succeeded(meeting=meeting, duration_seconds=42)
+    queue.mark_transcription_progress(meeting=meeting, progress=25)
 
     sql = normalize_sql(connection.executed_sql)
-    assert "status = 'done'" in sql
-    assert "duration_seconds = %(duration_seconds)s" in sql
-    assert "transcription_progress = null" in sql
-    assert "updated_at = now()" in sql
-    assert "where id = %(meeting_id)s and status = 'normalizing'" in sql
-    assert connection.executed_params == {
-        "meeting_id": meeting.id,
-        "duration_seconds": 42,
-    }
+    assert "transcription_progress = %(progress)s" in sql
+    assert "status = 'transcribing'" in sql
+    assert "transcription_progress < %(progress)s" in sql
+    assert connection.executed_params == {"meeting_id": meeting.id, "progress": 25}
     assert ("execute", True) in connection.events
+
+
+def test_mark_transcription_progress_rejects_terminal_or_invalid_progress() -> None:
+    queue = PostgresMeetingQueue(lambda: RecordingConnection(row=None))
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.TRANSCRIBING,
+        resume_from_stage=None,
+        transcription_progress=10,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    for progress in (-1, 100, 101):
+        with pytest.raises(ValueError, match="progress must be between 0 and 99"):
+            queue.mark_transcription_progress(meeting=meeting, progress=progress)
+
+
+def test_mark_transcription_succeeded_replaces_segments_and_marks_done() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1, 1, 1])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.TRANSCRIBING,
+        resume_from_stage=None,
+        transcription_progress=95,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+    segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.5,
+            speaker_label="SPEAKER_00",
+            text="Hello world",
+        ),
+        TranscriptSegmentDraft(
+            start_seconds=1.5,
+            end_seconds=3.25,
+            speaker_label="SPEAKER_00",
+            text="Second segment",
+        ),
+    ]
+
+    queue.mark_transcription_succeeded(meeting=meeting, segments=segments)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert statements[0] == (
+        "delete from transcript_segments where meeting_id = %(meeting_id)s",
+        {"meeting_id": meeting.id},
+    )
+    first_insert_sql, first_insert_params = statements[1]
+    assert first_insert_sql.startswith("insert into transcript_segments")
+    assert first_insert_params == {
+        "meeting_id": meeting.id,
+        "start_seconds": "0.000",
+        "end_seconds": "1.500",
+        "speaker_label": "SPEAKER_00",
+        "text": "Hello world",
+    }
+    update_sql, update_params = statements[-1]
+    assert "status = 'done'" in update_sql
+    assert "transcription_progress = 100" in update_sql
+    assert "where id = %(meeting_id)s and status = 'transcribing'" in update_sql
+    assert update_params == {"meeting_id": meeting.id}
+
+
+def test_mark_transcription_succeeded_rejects_empty_segments() -> None:
+    queue = PostgresMeetingQueue(lambda: RecordingConnection(row=None))
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.TRANSCRIBING,
+        resume_from_stage=None,
+        transcription_progress=95,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    with pytest.raises(ValueError, match="at least one transcript segment"):
+        queue.mark_transcription_succeeded(meeting=meeting, segments=[])
 
 
 def test_status_write_raises_when_no_row_was_updated() -> None:
@@ -194,7 +319,7 @@ def test_status_write_raises_when_no_row_was_updated() -> None:
     )
 
     with pytest.raises(RuntimeError, match="updated 0 rows"):
-        queue.mark_normalization_succeeded(meeting=meeting, duration_seconds=42)
+        queue.mark_transcription_started(meeting=meeting, duration_seconds=42)
 
 
 def test_later_stage_recovery_failure_message_names_current_vertical_slice() -> None:
@@ -202,7 +327,7 @@ def test_later_stage_recovery_failure_message_names_current_vertical_slice() -> 
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
         id=UUID("00000000-0000-0000-0000-000000000001"),
-        status=MeetingStatus.TRANSCRIBING,
+        status=MeetingStatus.DIARIZING,
         resume_from_stage=None,
         transcription_progress=50,
         error_kind=None,
@@ -216,11 +341,140 @@ def test_later_stage_recovery_failure_message_names_current_vertical_slice() -> 
         "meeting_id": meeting.id,
         "error_kind": "unknown",
         "error_message": (
-            "Worker recovered a meeting at 'transcribing', but recovery beyond "
-            "'transcribing' is not implemented in this issue #7 normalization-only slice."
+            "Worker recovered a meeting at 'diarizing', but recovery beyond "
+            "'diarizing' is not implemented in this issue #8 transcription slice."
         ),
-        "failed_at_stage": "transcribing",
+        "failed_at_stage": "diarizing",
     }
+
+
+def test_real_postgres_transcription_success_replaces_segments_without_duplicates() -> None:
+    database_url = os.getenv("WORKER_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip(
+            "set WORKER_TEST_DATABASE_URL to run the real transcript persistence check"
+        )
+
+    schema_name = f"worker_transcript_test_{uuid4().hex}"
+    row_id = uuid4()
+
+    with psycopg.connect(database_url, autocommit=True) as admin:
+        admin.execute(f'create schema "{schema_name}"')
+        admin.execute(f'set search_path to "{schema_name}"')
+        admin.execute(
+            """
+            create type meeting_status as enum (
+              'pending',
+              'normalizing',
+              'transcribing',
+              'diarizing',
+              'summarizing',
+              'done',
+              'error'
+            )
+            """
+        )
+        admin.execute(
+            """
+            create table meetings (
+              id uuid primary key,
+              status meeting_status not null,
+              duration_seconds integer,
+              resume_from_stage meeting_status,
+              transcription_progress integer,
+              error_kind text,
+              error_message text,
+              failed_at_stage meeting_status,
+              created_at timestamptz not null,
+              updated_at timestamptz not null default now()
+            )
+            """
+        )
+        admin.execute(
+            """
+            create table transcript_segments (
+              id uuid primary key default (md5(random()::text || clock_timestamp()::text)::uuid),
+              meeting_id uuid not null references meetings(id) on delete cascade,
+              start_seconds numeric(10, 3) not null,
+              end_seconds numeric(10, 3) not null,
+              speaker_label text not null,
+              text text not null
+            )
+            """
+        )
+        admin.execute(
+            "insert into meetings (id, status, created_at) values (%s, 'transcribing', now())",
+            [row_id],
+        )
+
+    def connection_factory() -> psycopg.Connection[object]:
+        connection = psycopg.connect(database_url)
+        connection.execute(f'set search_path to "{schema_name}"')
+        connection.commit()
+        return connection
+
+    try:
+        queue = PostgresMeetingQueue(connection_factory)
+        meeting = QueuedMeeting(
+            id=row_id,
+            status=MeetingStatus.TRANSCRIBING,
+            resume_from_stage=None,
+            transcription_progress=None,
+            error_kind=None,
+            error_message=None,
+            failed_at_stage=None,
+        )
+
+        queue.mark_transcription_succeeded(
+            meeting=meeting,
+            segments=[
+                TranscriptSegmentDraft(
+                    start_seconds=0.0,
+                    end_seconds=1.0,
+                    speaker_label="SPEAKER_00",
+                    text="stale segment",
+                )
+            ],
+        )
+        with connection_factory() as connection:
+            connection.execute(
+                "update meetings set status = 'transcribing' where id = %s", [row_id]
+            )
+            connection.commit()
+
+        queue.mark_transcription_succeeded(
+            meeting=meeting,
+            segments=[
+                TranscriptSegmentDraft(
+                    start_seconds=0.0,
+                    end_seconds=1.0,
+                    speaker_label="SPEAKER_00",
+                    text="replacement one",
+                ),
+                TranscriptSegmentDraft(
+                    start_seconds=1.0,
+                    end_seconds=2.0,
+                    speaker_label="SPEAKER_00",
+                    text="replacement two",
+                ),
+            ],
+        )
+
+        with connection_factory() as connection:
+            segment_rows = connection.execute(
+                "select text from transcript_segments where meeting_id = %s order by start_seconds",
+                [row_id],
+            ).fetchall()
+            meeting_row = connection.execute(
+                "select status, transcription_progress from meetings where id = %s",
+                [row_id],
+            ).fetchone()
+
+        assert segment_rows == [("replacement one",), ("replacement two",)]
+        assert meeting_row == ("done", 100)
+    finally:
+        with psycopg.connect(database_url, autocommit=True) as admin:
+            admin.execute(f'drop schema if exists "{schema_name}" cascade')
 
 
 def test_real_postgres_claim_next_does_not_duplicate_pending_claim_before_processing() -> (

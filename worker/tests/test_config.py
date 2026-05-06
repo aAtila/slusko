@@ -18,6 +18,11 @@ def test_load_config_sets_listener_autocommit_and_tcp_keepalives() -> None:
     assert config.meetings_dir == "/data/meetings"
     assert config.model_cache_dir == "/data/models"
     assert config.hf_home == "/data/models"
+    assert config.whisper_model == "large-v3"
+    assert config.whisper_device == "auto"
+    assert config.whisper_compute_type == "auto"
+    assert config.transcription_progress_min_delta == 5
+    assert config.transcription_progress_min_interval_seconds == 5.0
 
 
 def test_load_config_defaults_hf_home_to_model_cache_dir() -> None:
@@ -63,3 +68,35 @@ def test_load_config_allows_overriding_hf_home() -> None:
 
     assert config.model_cache_dir == "/custom/models"
     assert config.hf_home == "/custom/hf-home"
+
+
+def test_load_config_allows_overriding_whisper_and_progress_settings() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "WHISPER_MODEL": "medium",
+            "WHISPER_DEVICE": "cpu",
+            "WHISPER_COMPUTE_TYPE": "int8",
+            "TRANSCRIPTION_PROGRESS_MIN_DELTA": "10",
+            "TRANSCRIPTION_PROGRESS_MIN_INTERVAL_SECONDS": "2.5",
+        }
+    )
+
+    assert config.whisper_model == "medium"
+    assert config.whisper_device == "cpu"
+    assert config.whisper_compute_type == "int8"
+    assert config.transcription_progress_min_delta == 10
+    assert config.transcription_progress_min_interval_seconds == 2.5
+
+
+def test_load_config_falls_back_for_invalid_progress_settings() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "TRANSCRIPTION_PROGRESS_MIN_DELTA": "0",
+            "TRANSCRIPTION_PROGRESS_MIN_INTERVAL_SECONDS": "-1",
+        }
+    )
+
+    assert config.transcription_progress_min_delta == 5
+    assert config.transcription_progress_min_interval_seconds == 5.0
