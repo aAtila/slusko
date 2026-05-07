@@ -29,27 +29,23 @@ Web app: http://localhost:5173
 
 ## Production deployment with Compose/Coolify
 
-Use `docker-compose.prod.yml` for production-style deployments. Unlike the local-dev `docker-compose.yml`, it builds the web `production` target, does not bind-mount `./web`, and lets `web/Dockerfile` run `bun run start`. It also includes a one-shot `migrate` service for Drizzle migrations.
+Use `docker-compose.prod.yml` for production-style deployments. Unlike the local-dev `docker-compose.yml`, it builds the web `production` target, does not bind-mount `./web`, and lets `web/Dockerfile` run `bun run start`.
+
+Production Postgres is a standalone Coolify-managed Database resource (sibling to the app stack on the same Coolify host), reached over Coolify's internal Docker network.
 
 Required production environment variables:
 
-- `POSTGRES_PASSWORD`
-- `DATABASE_URL` (for the bundled Postgres service, use `postgres://<user>:<password>@postgres:5432/<db>`)
+- `DATABASE_URL` (set this manually in Coolify app environment config as the single source of truth)
 - `HF_TOKEN` if diarization needs Hugging Face access
 
-One-time/per-deploy migration step:
+Deploy flow in Coolify:
 
-```bash
-docker compose -f docker-compose.prod.yml run --rm migrate
-```
+1. Configure the Coolify pre-deployment command to run `bun run db:migrate` in the web app/migration environment with the same manually configured `DATABASE_URL`.
+2. Keep `docker-compose.prod.yml` as the app stack definition for `web` and `worker`.
 
-Then start the production stack:
+If migrations fail, Coolify aborts the rollout before new `web`/`worker` containers are exposed.
 
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-For Coolify, configure the resource as Docker Compose and point the compose file path to `docker-compose.prod.yml`.
+The `migrate` service in `docker-compose.prod.yml` remains available as a manual escape hatch for ad-hoc migration operations, but it is not the normal deploy path.
 
 ## Stop the stack
 
@@ -57,7 +53,7 @@ For Coolify, configure the resource as Docker Compose and point the compose file
 docker compose down
 ```
 
-Do **not** run `docker compose down -v` unless you intentionally want to delete named volumes: local Postgres data (`postgres_data`), uploaded meetings (`slusko_meetings`), and model cache (`slusko_models`).
+Do **not** run `docker compose down -v` unless you intentionally want to delete named volumes: uploaded meetings (`slusko_meetings`) and model cache (`slusko_models`).
 
 ## Worker runtime notes (issue #7 slice)
 

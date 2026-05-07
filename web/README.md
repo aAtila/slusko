@@ -56,14 +56,9 @@ docker compose up web worker
 
 ## Production Compose workflow
 
-From repo root, use the production compose file for Coolify/self-hosted deployments:
+For production deployment with Coolify, use the repo-root `README.md` section **"Production deployment with Compose/Coolify"** as the canonical guide.
 
-```bash
-docker compose -f docker-compose.prod.yml run --rm migrate
-docker compose -f docker-compose.prod.yml up -d
-```
-
-`docker-compose.prod.yml` builds the web `production` target and runs the Dockerfile `start` command. Its one-shot `migrate` service builds the web `build` target so Drizzle config and migration files are available. The local-dev `docker-compose.yml` intentionally runs `bun run dev` with a source bind mount.
+That flow uses a standalone Coolify-managed Postgres resource, sets `DATABASE_URL` manually in Coolify app env config, and runs `bun run db:migrate` as a Coolify pre-deployment command. The `migrate` service in `docker-compose.prod.yml` is a manual escape hatch only.
 
 ## Database commands
 
