@@ -67,3 +67,12 @@ serially. No worker pool, no parallel jobs.
 - Scaling out later is a small change: run multiple worker containers
   against the same Postgres. `SELECT FOR UPDATE SKIP LOCKED` already makes
   this race-safe. No data-model change required.
+
+## See also
+
+- [ADR 0012 — Coolify-managed Postgres in production](./0012-coolify-managed-postgres-in-prod.md)
+  narrows the "three first-class services: postgres, web, worker"
+  enumeration above: in prod, the `postgres` Compose service is replaced by
+  a Coolify-managed standalone Postgres resource. The queue semantics in
+  this ADR (`LISTEN/NOTIFY`, `SELECT … FOR UPDATE SKIP LOCKED`,
+  scan-on-boot, single-worker serialization) are unchanged.

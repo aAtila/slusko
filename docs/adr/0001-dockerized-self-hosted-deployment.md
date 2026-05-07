@@ -58,3 +58,11 @@ on hardware we control. The boundary of "our data" is the host machine.
   a hard dependency. (See future ADR.)
 - Cloud LLM use for **summarization only** (text, not audio) remains open as
   a separate decision.
+
+## See also
+
+- [ADR 0012 — Coolify-managed Postgres in production](./0012-coolify-managed-postgres-in-prod.md)
+  narrows "the same Compose stack runs local and prod": in prod, Postgres is
+  a Coolify-managed sibling resource rather than a service inside
+  `docker-compose.prod.yml`. The application stack and the
+  "infra we control" stance are unchanged.
