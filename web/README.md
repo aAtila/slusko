@@ -54,6 +54,17 @@ docker compose run --rm web bun run db:seed # optional sample meetings and trans
 docker compose up web worker
 ```
 
+## Production Compose workflow
+
+From repo root, use the production compose file for Coolify/self-hosted deployments:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm migrate
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`docker-compose.prod.yml` builds the web `production` target and runs the Dockerfile `start` command. Its one-shot `migrate` service builds the web `build` target so Drizzle config and migration files are available. The local-dev `docker-compose.yml` intentionally runs `bun run dev` with a source bind mount.
+
 ## Database commands
 
 Drizzle is the canonical schema/migration tool for the web app. From `web/`:
