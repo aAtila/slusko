@@ -8,6 +8,10 @@ dependencies = [
   "faster-whisper>=1.1,<2",
   "psycopg[binary]>=3.2,<4",
   "pyannote.audio>=3,<4",
+  # pyannote.audio 3.x still references torchaudio.AudioMetaData, which was
+  # removed from torchaudio 2.9+. Keep torch/torchaudio on the compatible line.
+  "torch==2.8.0",
+  "torchaudio==2.8.0",
 ]
 
 [project.optional-dependencies]
