@@ -39,7 +39,7 @@ From `web/`:
 ```bash
 export DATABASE_URL=postgres://slusko:slusko@localhost:5432/slusko
 bun run db:migrate
-bun run db:seed # optional: upsert sample local-development meetings
+bun run db:seed # optional: upsert sample meetings and transcript fixtures
 # or: bun run db:seed:reset # optional: clear meetings first for deterministic QA data
 bun run dev
 ```
@@ -49,7 +49,7 @@ bun run dev
 ```bash
 docker compose up -d postgres
 docker compose run --rm web bun run db:migrate
-docker compose run --rm web bun run db:seed # optional sample meetings
+docker compose run --rm web bun run db:seed # optional sample meetings and transcript fixtures
 # or: docker compose run --rm web bun run db:seed:reset # optional deterministic QA data
 docker compose up web worker
 ```
@@ -61,12 +61,12 @@ Drizzle is the canonical schema/migration tool for the web app. From `web/`:
 ```bash
 bun run db:generate   # generate SQL from app/db/schema.ts
 bun run db:migrate    # apply app/db/migrations to DATABASE_URL
-bun run db:seed       # upsert sample local-development meetings
+bun run db:seed       # upsert sample local-development meetings and transcript fixtures
 bun run db:seed:reset # delete existing meetings, then insert deterministic QA seeds
 bun run db:studio     # inspect the database with Drizzle Studio
 ```
 
-`db:seed:reset` deletes existing Meeting rows for the configured `DATABASE_URL` before inserting the QA fixtures. Use it only for local/dev databases where losing current Meeting data is expected.
+`db:seed` also replaces transcript rows for deterministic seed-owned meetings so local detail pages cover transcript lifecycle states. `db:seed:reset` deletes existing Meeting rows for the configured `DATABASE_URL` before inserting the QA fixtures. Use it only for local/dev databases where losing current Meeting data is expected.
 
 ## Quality checks
 

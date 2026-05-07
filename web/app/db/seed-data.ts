@@ -1,6 +1,8 @@
-import type { meetings } from "./schema";
+import type { meetings, transcriptSegments } from "./schema";
 
 export type DevelopmentMeetingSeed = typeof meetings.$inferInsert;
+export type DevelopmentTranscriptSegmentSeed =
+  typeof transcriptSegments.$inferInsert;
 
 const seedCreatedAt = new Date("2026-05-04T09:00:00.000Z");
 const seedUpdatedAt = new Date("2026-05-04T09:00:00.000Z");
@@ -114,16 +116,88 @@ export const developmentMeetingSeeds = [
   {
     id: "44444444-4444-4444-8444-444444444444",
     title: "Ops incident review",
-    sourceFilenames: ["ops-incident-review.mov"],
+    sourceFilenames: ["ops-incident-review.mp4"],
     uploadedBy: "local-dev",
     status: "error",
     errorKind: "transcription_empty",
     errorMessage: "No speech was detected in the uploaded recording.",
     failedAtStage: "transcribing",
     resumeFromStage: "transcribing",
-    transcriptionProgress: 100,
+    transcriptionProgress: null,
     durationSeconds: 612,
     createdAt: new Date("2026-05-01T11:15:00.000Z"),
     updatedAt: seedUpdatedAt,
   },
+  {
+    id: "99999999-9999-4999-8999-999999999999",
+    title: "Partner onboarding call",
+    sourceFilenames: ["partner-onboarding-call.m4a"],
+    uploadedBy: "local-dev",
+    status: "error",
+    errorKind: "diarization_failed",
+    errorMessage: "Speaker diarization failed after transcription completed.",
+    failedAtStage: "diarizing",
+    resumeFromStage: "diarizing",
+    transcriptionProgress: null,
+    durationSeconds: 1_806,
+    createdAt: new Date("2026-05-01T10:30:00.000Z"),
+    updatedAt: seedUpdatedAt,
+  },
 ] satisfies DevelopmentMeetingSeed[];
+
+export const developmentTranscriptSegmentSeeds = [
+  {
+    id: "77777777-7777-4777-8777-777777777701",
+    meetingId: "77777777-7777-4777-8777-777777777777",
+    startSeconds: 0,
+    endSeconds: 4.8,
+    speakerLabel: "SPEAKER_00",
+    text: "Welcome everyone, let's start with the research goals.",
+    createdAt: seedCreatedAt,
+  },
+  {
+    id: "77777777-7777-4777-8777-777777777702",
+    meetingId: "77777777-7777-4777-8777-777777777777",
+    startSeconds: 75.9,
+    endSeconds: 83.2,
+    speakerLabel: "SPEAKER_01",
+    text: "The main pattern is that teams want shorter follow-ups.",
+    createdAt: seedCreatedAt,
+  },
+  {
+    id: "33333333-3333-4333-8333-333333333301",
+    meetingId: "33333333-3333-4333-8333-333333333333",
+    startSeconds: 0,
+    endSeconds: 6.4,
+    speakerLabel: "SPEAKER_00",
+    text: "Last sprint went well, but handoffs were still unclear.",
+    createdAt: seedCreatedAt,
+  },
+  {
+    id: "33333333-3333-4333-8333-333333333302",
+    meetingId: "33333333-3333-4333-8333-333333333333",
+    startSeconds: 75.9,
+    endSeconds: 82.5,
+    speakerLabel: "SPEAKER_01",
+    text: "Let's document owners before we close each retro item.",
+    createdAt: seedCreatedAt,
+  },
+  {
+    id: "99999999-9999-4999-8999-999999999901",
+    meetingId: "99999999-9999-4999-8999-999999999999",
+    startSeconds: 0,
+    endSeconds: 5.1,
+    speakerLabel: "SPEAKER_00",
+    text: "Thanks for joining the onboarding call today.",
+    createdAt: seedCreatedAt,
+  },
+  {
+    id: "99999999-9999-4999-8999-999999999902",
+    meetingId: "99999999-9999-4999-8999-999999999999",
+    startSeconds: 75.9,
+    endSeconds: 81.4,
+    speakerLabel: "SPEAKER_00",
+    text: "We'll pause here until speaker labeling can be retried.",
+    createdAt: seedCreatedAt,
+  },
+] satisfies DevelopmentTranscriptSegmentSeed[];
