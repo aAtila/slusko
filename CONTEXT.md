@@ -237,21 +237,37 @@ full**. No per-section copy buttons in v1.
 
 ## Language handling
 
-Slusko is built for a Serbian + English code-switched audience.
+Slusko is built for a Serbian + English code-switched audience, with a
+roughly 80/20 Serbian/English split in real recordings.
 
-- **Transcription** uses Whisper auto-detection (`language=None`). No
-  upload-time language picker; `large-v3` handles code-switching well
-  enough that forcing a language tends to make things worse, not better.
+- **Transcription language is chosen at upload time**, not auto-detected
+  by default. The three options are **Serbian** (default), **English**,
+  and **Auto-detect**. Drag-and-drop uses the default without prompting;
+  the "+ New Meeting" form exposes the picker. The meeting list row
+  displays the resolved language alongside duration so misclassifications
+  are visible post-hoc. Auto-detection was the previous default but was
+  reversed after observed misclassifications (Whisper consistently picked
+  `hr` instead of `sr`, and silent intros defeated the first-30s detection
+  window). See
+  [ADR 0013](./docs/adr/0013-forced-transcription-language-and-latin-script.md).
+- **Transcripts are always written in Latin script.** Whisper's `sr`
+  head outputs Cyrillic; the worker post-processes every transcript with
+  a deterministic Cyrillic→Latin transliteration before writing segments
+  to Postgres. The transliteration is a no-op on already-Latin text, so
+  it runs unconditionally and no downstream consumer (summary, UI,
+  exports, search) needs to know about scripts.
 - **Summary** is written by the LLM in whichever language dominates the
   transcript. If roughly even, Serbian is the default. No upload-time
-  output-language picker.
+  output-language picker — the summary follows the transcript by
+  construction.
 - **Technical and product terms** ("backend", "PR review", "Q2 OKRs",
   "sprint") are preserved in their original language inside summaries —
   the prompt explicitly forbids translating them. This avoids
   Serbianizing English jargon into unreadable phrases.
 
-These are prompt-level rules, not data-model rules. Changing them later
-is a prompt edit, not a migration.
+The transcription-language choice and detected language are **data-model
+fields** on the Meeting (`language`, `detectedLanguage` — see ADR 0013).
+The summary and term-preservation rules remain prompt-level only.
 
 ## Access model (v1)
 
