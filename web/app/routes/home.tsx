@@ -127,7 +127,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
+    <main className="min-h-screen bg-slate-50 text-slate-950">
       <section
         className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-10 sm:px-8 lg:px-10"
         onDragEnter={(event) => {
@@ -156,15 +156,15 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           submitRecording(event.dataTransfer.files.item(0));
         }}
       >
-        <header className="flex flex-col gap-6 border-b border-white/10 pb-8 sm:flex-row sm:items-end sm:justify-between">
+        <header className="flex flex-col gap-6 border-b border-slate-200 pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-medium tracking-[0.3em] text-cyan-300 uppercase">
+            <p className="text-sm font-medium tracking-[0.3em] text-cyan-700 uppercase">
               Slusko
             </p>
             <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
               Meetings
             </h1>
-            <p className="mt-4 max-w-2xl text-base text-slate-300">
+            <p className="mt-4 max-w-2xl text-base text-slate-600">
               Drop in a recording, then follow transcription, diarization, and
               summary progress from one list.
             </p>
@@ -182,30 +182,30 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               type="file"
             />
             <button
-              className="inline-flex items-center justify-center rounded-full bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-full bg-cyan-600 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-cyan-200/70 transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isUploading}
               onClick={() => fileInputRef.current?.click()}
               type="button"
             >
               {isUploading ? "Uploading…" : "+ New Meeting"}
             </button>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               MP3, M4A, WAV, or MP4 · up to the configured upload limit
             </p>
           </div>
         </header>
 
         {uploadError ? (
-          <p className="mt-5 rounded-2xl border border-orange-300/25 bg-orange-300/10 px-4 py-3 text-sm text-orange-100">
+          <p className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
             {uploadError}
           </p>
         ) : null}
 
         <div
-          className={`mt-8 flex flex-1 rounded-3xl border border-dashed p-4 shadow-2xl shadow-black/20 transition sm:p-6 ${
+          className={`mt-8 flex flex-1 rounded-3xl border border-dashed p-4 shadow-sm shadow-slate-200/70 transition sm:p-6 ${
             isDraggingRecording
-              ? "border-cyan-200 bg-cyan-300/10"
-              : "border-white/15 bg-white/[0.03]"
+              ? "border-cyan-300 bg-cyan-50"
+              : "border-slate-300 bg-white"
           }`}
         >
           {meetings.length === 0 ? (
@@ -221,12 +221,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
 function EmptyMeetings({ isUploading }: { isUploading: boolean }) {
   return (
-    <div className="flex w-full flex-col items-center justify-center rounded-2xl border border-white/10 bg-slate-900/70 px-6 py-20 text-center">
-      <div className="flex size-14 items-center justify-center rounded-2xl bg-cyan-300/15 text-2xl">
+    <div className="flex w-full flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white px-6 py-20 text-center">
+      <div className="flex size-14 items-center justify-center rounded-2xl bg-cyan-100 text-2xl">
         🎙️
       </div>
       <h2 className="mt-6 text-2xl font-semibold">No meetings yet</h2>
-      <p className="mt-3 max-w-md text-sm leading-6 text-slate-300">
+      <p className="mt-3 max-w-md text-sm leading-6 text-slate-600">
         {isUploading
           ? "Uploading your recording and queueing the meeting…"
           : "Drag and drop an audio or video recording here, or use New Meeting to upload your first conversation."}
@@ -237,8 +237,8 @@ function EmptyMeetings({ isUploading }: { isUploading: boolean }) {
 
 function MeetingList({ meetings }: { meetings: HomeMeetingListItem[] }) {
   return (
-    <div className="w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-900/70">
-      <ul className="divide-y divide-white/10">
+    <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <ul className="divide-y divide-slate-200">
         {meetings.map((meeting) => {
           const isFailed = meeting.status === "error";
 
@@ -246,7 +246,7 @@ function MeetingList({ meetings }: { meetings: HomeMeetingListItem[] }) {
             <li
               className={`flex flex-col gap-4 border-l-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${
                 isFailed
-                  ? "border-l-orange-400 bg-orange-500/10"
+                  ? "border-l-orange-300 bg-orange-50"
                   : "border-l-transparent"
               }`}
               key={meeting.id}
@@ -256,10 +256,10 @@ function MeetingList({ meetings }: { meetings: HomeMeetingListItem[] }) {
                 to={`/meetings/${meeting.id}`}
               >
                 <div>
-                  <h2 className="text-lg font-medium text-white">
+                  <h2 className="text-lg font-medium text-slate-900">
                     {meeting.title}
                   </h2>
-                  <p className="mt-1 text-sm text-slate-400">
+                  <p className="mt-1 text-sm text-slate-500">
                     <RelativeUploadDate createdAt={meeting.createdAt} />
                     {meeting.durationSeconds !== null
                       ? ` · ${formatDuration(meeting.durationSeconds)}`
@@ -291,10 +291,10 @@ function StatusBadge({
     transcriptionProgress: progress,
   });
   const toneStyles: Record<MeetingStatusTone, string> = {
-    active: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
-    danger: "border-orange-300/40 bg-orange-300/15 text-orange-100",
-    queued: "border-slate-300/25 bg-slate-300/10 text-slate-200",
-    success: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
+    active: "border-cyan-200 bg-cyan-50 text-cyan-800",
+    danger: "border-orange-200 bg-orange-50 text-orange-800",
+    queued: "border-slate-200 bg-slate-100 text-slate-700",
+    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
   };
 
   return (

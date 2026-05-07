@@ -126,17 +126,17 @@ export default function MeetingDetailPage({
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
+    <main className="min-h-screen bg-slate-50 text-slate-950">
       <section className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-10 sm:px-8 lg:px-10">
         <Link
-          className="text-sm font-medium text-cyan-200 transition hover:text-cyan-100"
+          className="text-sm font-medium text-cyan-700 transition hover:text-cyan-600"
           to="/"
         >
           ← Back to meetings
         </Link>
 
-        <header className="mt-8 border-b border-white/10 pb-8">
-          <p className="text-sm font-medium tracking-[0.3em] text-cyan-300 uppercase">
+        <header className="mt-8 border-b border-slate-200 pb-8">
+          <p className="text-sm font-medium tracking-[0.3em] text-cyan-700 uppercase">
             Meeting detail
           </p>
           <div className="mt-4 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
@@ -155,7 +155,7 @@ export default function MeetingDetailPage({
                           ? true
                           : undefined
                       }
-                      className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-3xl font-semibold tracking-tight text-white transition outline-none placeholder:text-slate-500 focus:border-cyan-200 focus:bg-white/[0.06] sm:text-4xl"
+                      className="min-w-0 flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-3xl font-semibold tracking-tight text-slate-900 transition outline-none placeholder:text-slate-400 focus:border-cyan-500 sm:text-4xl"
                       disabled={isDeleting || isUpdatingTitle}
                       id="meeting-title"
                       maxLength={200}
@@ -166,14 +166,14 @@ export default function MeetingDetailPage({
                     />
                     <div className="flex gap-2">
                       <button
-                        className="inline-flex items-center justify-center rounded-full bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center justify-center rounded-full bg-cyan-600 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-cyan-200/70 transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={isDeleting || isUpdatingTitle}
                         type="submit"
                       >
                         {isUpdatingTitle ? "Saving…" : "Save"}
                       </button>
                       <button
-                        className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center justify-center rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={isUpdatingTitle}
                         onClick={cancelTitleEdit}
                         type="button"
@@ -190,11 +190,11 @@ export default function MeetingDetailPage({
               ) : (
                 <div className="space-y-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <h1 className="min-w-0 flex-1 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                    <h1 className="min-w-0 flex-1 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
                       {meeting.title}
                     </h1>
                     <button
-                      className="inline-flex w-fit items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex w-fit items-center justify-center rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={isDeleting || isUpdatingTitle}
                       onClick={beginTitleEdit}
                       type="button"
@@ -219,12 +219,12 @@ export default function MeetingDetailPage({
             <DetailField label="Duration" value={formattedDuration} />
             <DetailField label="Status" value={presentation.label} />
           </dl>
-          <p className="mt-4 text-sm text-slate-300">
+          <p className="mt-4 text-sm text-slate-600">
             Current pipeline state: {presentation.label.toLowerCase()}.
           </p>
         </header>
 
-        <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70">
           <dl className="grid gap-5 sm:grid-cols-2">
             <DetailField label="Status" value={presentation.label} />
             <DetailField label="Duration" value={formattedDuration} />
@@ -258,18 +258,18 @@ export default function MeetingDetailPage({
           />
         </section>
 
-        <section className="mt-8 rounded-3xl border border-orange-300/25 bg-orange-300/10 p-6">
+        <section className="mt-8 rounded-3xl border border-orange-200 bg-orange-50 p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-orange-100">
+              <h2 className="text-lg font-semibold text-orange-900">
                 Delete meeting
               </h2>
-              <p className="mt-2 text-sm text-orange-50/80">
+              <p className="mt-2 text-sm text-orange-800">
                 Removes this meeting record and its stored audio artifacts.
               </p>
               {actionData?.ok === false &&
               actionData.intent === "delete-meeting" ? (
-                <p className="mt-3 text-sm font-medium text-orange-100">
+                <p className="mt-3 text-sm font-medium text-orange-800">
                   {actionData.error}
                 </p>
               ) : null}
@@ -288,7 +288,7 @@ export default function MeetingDetailPage({
             >
               <input name="_intent" type="hidden" value="delete-meeting" />
               <button
-                className="inline-flex items-center justify-center rounded-full border border-orange-200/50 px-5 py-3 text-sm font-semibold text-orange-50 transition hover:bg-orange-200/10 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center rounded-full border border-orange-300 px-5 py-3 text-sm font-semibold text-orange-900 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={isDeleting || isUpdatingTitle}
                 type="submit"
               >
@@ -315,14 +315,14 @@ function TitleFeedback({
 
   if (!actionData.ok) {
     return (
-      <p className="text-sm font-medium text-orange-100" id={feedbackId}>
+      <p className="text-sm font-medium text-orange-800" id={feedbackId}>
         {actionData.error}
       </p>
     );
   }
 
   return (
-    <p className="text-sm font-medium text-emerald-200" id={feedbackId}>
+    <p className="text-sm font-medium text-emerald-700" id={feedbackId}>
       Title saved as “{actionData.title}”.
     </p>
   );
@@ -336,9 +336,9 @@ function PlaceholderPanel({
   title: string;
 }) {
   return (
-    <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
-      <h2 className="text-2xl font-semibold text-white">{title}</h2>
-      <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>
+    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70">
+      <h2 className="text-2xl font-semibold text-slate-900">{title}</h2>
+      <p className="mt-3 text-sm leading-6 text-slate-600">{description}</p>
     </article>
   );
 }
@@ -359,22 +359,22 @@ export function TranscriptPanel({
   }
 
   return (
-    <article className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
-      <h2 className="text-2xl font-semibold text-white">Transcript</h2>
+    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70">
+      <h2 className="text-2xl font-semibold text-slate-900">Transcript</h2>
       {segments.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-slate-300">{emptyMessage}</p>
+        <p className="mt-3 text-sm leading-6 text-slate-600">{emptyMessage}</p>
       ) : (
         <ol className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
           {segments.map((segment) => (
             <li
-              className="rounded-2xl border border-white/10 bg-slate-950/60 p-3"
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
               key={segment.id}
             >
-              <p className="text-xs font-semibold tracking-wide text-cyan-200">
+              <p className="text-xs font-semibold tracking-wide text-cyan-700">
                 <time>[{formatTranscriptTimestamp(segment.startSeconds)}]</time>{" "}
                 {segment.speakerLabel}
               </p>
-              <p className="mt-2 text-sm leading-6 text-slate-100">
+              <p className="mt-2 text-sm leading-6 text-slate-800">
                 {segment.text}
               </p>
             </li>
@@ -391,15 +391,15 @@ function DetailField({ label, value }: { label: string; value: string }) {
       <dt className="text-xs font-semibold tracking-[0.2em] text-slate-500 uppercase">
         {label}
       </dt>
-      <dd className="mt-2 text-base text-slate-100">{value}</dd>
+      <dd className="mt-2 text-base text-slate-800">{value}</dd>
     </div>
   );
 }
 
 function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
   return (
-    <div className="mt-8 rounded-2xl border border-orange-300/25 bg-orange-300/10 p-5">
-      <h2 className="text-lg font-semibold text-orange-100">
+    <div className="mt-8 rounded-2xl border border-orange-200 bg-orange-50 p-5">
+      <h2 className="text-lg font-semibold text-orange-900">
         Processing failed
       </h2>
       <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
@@ -412,10 +412,10 @@ function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
           value={meeting.failedAtStage ?? "Unknown"}
         />
         <div className="sm:col-span-2">
-          <dt className="text-xs font-semibold tracking-[0.2em] text-orange-200/70 uppercase">
+          <dt className="text-xs font-semibold tracking-[0.2em] text-orange-700 uppercase">
             Error message
           </dt>
-          <dd className="mt-2 text-orange-50">
+          <dd className="mt-2 text-orange-900">
             {meeting.errorMessage ?? "No error message was recorded."}
           </dd>
         </div>
@@ -436,10 +436,10 @@ function StatusBadge({
     transcriptionProgress: progress,
   });
   const toneStyles: Record<MeetingStatusTone, string> = {
-    active: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
-    danger: "border-orange-300/40 bg-orange-300/15 text-orange-100",
-    queued: "border-slate-300/25 bg-slate-300/10 text-slate-200",
-    success: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
+    active: "border-cyan-200 bg-cyan-50 text-cyan-800",
+    danger: "border-orange-200 bg-orange-50 text-orange-800",
+    queued: "border-slate-200 bg-slate-100 text-slate-700",
+    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
   };
 
   return (
