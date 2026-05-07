@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from uuid import UUID
 
 import pytest
@@ -13,7 +14,12 @@ from slusko_worker.db.models import (
     QueuedMeeting,
     TranscriptSegmentDraft,
 )
-from slusko_worker.pipeline.diarization import PyannoteDiarizer, assign_speakers
+from slusko_worker.pipeline.diarization import (
+    PyannoteDiarizer,
+    _hf_hub_download_with_pyannote_auth_keyword,
+    _patch_pyannote_hf_hub_download_auth_keyword,
+    assign_speakers,
+)
 from slusko_worker.pipeline.errors import DiarizationFailed
 
 
@@ -333,6 +339,37 @@ def test_pyannote_diarizer_wraps_missing_audio_load_and_runtime_failures(tmp_pat
             normalized_path=normalized_file(tmp_path),
             transcript_segments=[transcript(0.0, 1.0, "hello")],
         )
+
+
+def test_pyannote_auth_compatibility_maps_legacy_keyword_to_modern_hub_token() -> None:
+    calls: list[dict[str, object]] = []
+
+    def modern_hf_hub_download(*, token: str | None = None) -> str | None:
+        calls.append({"token": token})
+        return token
+
+    compatible_download = _hf_hub_download_with_pyannote_auth_keyword(
+        modern_hf_hub_download
+    )
+
+    assert compatible_download(use_auth_token="hf_test") == "hf_test"
+    assert compatible_download(use_auth_token="ignored", token="hf_override") == "hf_override"
+    assert calls == [{"token": "hf_test"}, {"token": "hf_override"}]
+
+
+def test_pyannote_auth_compatibility_patches_loaded_pyannote_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def modern_hf_hub_download(*, token: str | None = None) -> str | None:
+        return token
+
+    module = ModuleType("pyannote.audio.core.pipeline")
+    module.hf_hub_download = modern_hf_hub_download  # type: ignore[attr-defined]
+    monkeypatch.setitem(__import__("sys").modules, module.__name__, module)
+
+    _patch_pyannote_hf_hub_download_auth_keyword()
+
+    assert module.hf_hub_download(use_auth_token="hf_test") == "hf_test"  # type: ignore[attr-defined]
 
 
 def test_default_pipeline_factory_maps_missing_pyannote_package_to_config_missing(monkeypatch: pytest.MonkeyPatch) -> None:

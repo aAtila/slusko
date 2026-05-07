@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from functools import wraps
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -144,7 +147,60 @@ def default_pipeline_factory(*args: Any, **kwargs: Any) -> PyannotePipelineLike:
             "Required Python package is missing: pyannote.audio",
             config_missing=True,
         ) from error
+    _patch_pyannote_hf_hub_download_auth_keyword()
     return Pipeline.from_pretrained(*args, **kwargs)
+
+
+def _patch_pyannote_hf_hub_download_auth_keyword() -> None:
+    """Adapt pyannote.audio 3.x to modern huggingface_hub auth kwargs.
+
+    pyannote.audio 3.x still passes ``use_auth_token`` to module-level
+    ``hf_hub_download`` references. Recent huggingface_hub versions renamed that
+    keyword to ``token``, which otherwise raises before the model can load.
+    """
+
+    for module_name in (
+        "pyannote.audio.core.pipeline",
+        "pyannote.audio.core.model",
+        "pyannote.audio.pipelines.speaker_verification",
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        download = getattr(module, "hf_hub_download", None)
+        if download is None:
+            continue
+        setattr(
+            module,
+            "hf_hub_download",
+            _hf_hub_download_with_pyannote_auth_keyword(download),
+        )
+
+
+def _hf_hub_download_with_pyannote_auth_keyword(
+    download: Callable[..., Any],
+) -> Callable[..., Any]:
+    if getattr(download, "__slusko_pyannote_auth_compat__", False):
+        return download
+
+    try:
+        parameters = inspect.signature(download).parameters
+    except (TypeError, ValueError):
+        return download
+
+    if "use_auth_token" in parameters or "token" not in parameters:
+        return download
+
+    @wraps(download)
+    def compatible_download(*args: Any, **kwargs: Any) -> Any:
+        use_auth_token = kwargs.pop("use_auth_token", None)
+        if use_auth_token is not None and "token" not in kwargs:
+            kwargs["token"] = use_auth_token
+        return download(*args, **kwargs)
+
+    compatible_download.__slusko_pyannote_auth_compat__ = True  # type: ignore[attr-defined]
+    return compatible_download
 
 
 def _segments_from_pyannote_annotation(
