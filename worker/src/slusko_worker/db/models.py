@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 
@@ -53,6 +54,46 @@ class DiarizationSegmentDraft:
     start_seconds: float
     end_seconds: float
     speaker_label: str
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryDecisionDraft:
+    """Worker-owned summary decision payload before DB persistence."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryActionItemOwnerDraft:
+    """Worker-owned action-item owner discriminated union payload."""
+
+    kind: Literal["name", "speaker", "unknown"]
+    value: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryActionItemDraft:
+    """Worker-owned summary action item payload before DB persistence."""
+
+    task: str
+    owner: SummaryActionItemOwnerDraft
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryOpenQuestionDraft:
+    """Worker-owned summary open-question payload before DB persistence."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryDraft:
+    """Worker-owned structured summary payload before DB persistence."""
+
+    overview: str
+    decisions: tuple[SummaryDecisionDraft, ...]
+    action_items: tuple[SummaryActionItemDraft, ...]
+    open_questions: tuple[SummaryOpenQuestionDraft, ...]
 
 
 @dataclass(frozen=True, slots=True)

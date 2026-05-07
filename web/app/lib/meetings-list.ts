@@ -1,4 +1,10 @@
-import type { ErrorKind, MeetingStatus } from "~/db/schema";
+import type {
+  ErrorKind,
+  MeetingStatus,
+  SummaryActionItem,
+  SummaryDecision,
+  SummaryOpenQuestion,
+} from "~/db/schema";
 
 export type HomeMeetingListItem = {
   id: string;
@@ -24,8 +30,17 @@ export type TranscriptSegment = {
   text: string;
 };
 
+export type MeetingSummary = {
+  overview: string;
+  decisions: SummaryDecision[];
+  actionItems: SummaryActionItem[];
+  openQuestions: SummaryOpenQuestion[];
+  updatedAt: string;
+};
+
 export type MeetingDetailRouteData = {
   meeting: MeetingDetail;
+  summary: MeetingSummary | null;
   transcriptSegments: TranscriptSegment[];
 };
 

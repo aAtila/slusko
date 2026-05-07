@@ -8,7 +8,17 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from slusko_worker.db.models import ErrorKind, MeetingStatus, QueuedMeeting, TranscriptSegmentDraft
+from slusko_worker.db.models import (
+    ErrorKind,
+    MeetingStatus,
+    QueuedMeeting,
+    SummaryActionItemDraft,
+    SummaryActionItemOwnerDraft,
+    SummaryDecisionDraft,
+    SummaryDraft,
+    SummaryOpenQuestionDraft,
+    TranscriptSegmentDraft,
+)
 from slusko_worker.db.queue import (
     CLAIM_NEXT_MEETING_SQL,
     NON_TERMINAL_STATUSES,
@@ -377,7 +387,7 @@ def test_mark_diarization_started_clears_errors_and_preserves_transcript_rows() 
     assert params == {"meeting_id": meeting.id}
 
 
-def test_mark_diarization_succeeded_replaces_segments_and_marks_done() -> None:
+def test_mark_diarization_succeeded_replaces_segments_and_marks_summarizing() -> None:
     connection = RecordingConnection(row=None, rowcounts=[1, 1, 1, 1])
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
@@ -421,12 +431,118 @@ def test_mark_diarization_succeeded_replaces_segments_and_marks_done() -> None:
         "text": "Hello world",
     }
     update_sql, update_params = statements[-1]
-    assert "status = 'done'" in update_sql
+    assert "status = 'summarizing'" in update_sql
     assert "error_kind = null" in update_sql
     assert "error_message = null" in update_sql
     assert "failed_at_stage = null" in update_sql
     assert "where id = %(meeting_id)s and status = 'diarizing'" in update_sql
     assert update_params == {"meeting_id": meeting.id}
+
+
+def test_mark_summarization_started_clears_errors_and_preserves_transcript_rows() -> None:
+    connection = RecordingConnection(row=None)
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.SUMMARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=ErrorKind.SUMMARIZATION_FAILED,
+        error_message="stale summary failure",
+        failed_at_stage=MeetingStatus.SUMMARIZING,
+    )
+
+    queue.mark_summarization_started(meeting)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert len(statements) == 1
+    sql, params = statements[0]
+    assert "status = 'summarizing'" in sql
+    assert "error_kind = null" in sql
+    assert "error_message = null" in sql
+    assert "failed_at_stage = null" in sql
+    assert "where id = %(meeting_id)s and status = 'summarizing'" in sql
+    assert "delete from transcript_segments" not in sql
+    assert params == {"meeting_id": meeting.id}
+
+
+def test_mark_summarization_succeeded_upserts_summary_and_marks_done() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.SUMMARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+    summary = SummaryDraft(
+        overview="Meeting overview",
+        decisions=(SummaryDecisionDraft(text="Ship it"),),
+        action_items=(
+            SummaryActionItemDraft(
+                task="Send notes",
+                owner=SummaryActionItemOwnerDraft(kind="speaker", value="SPEAKER_00"),
+            ),
+            SummaryActionItemDraft(
+                task="Publish recap",
+                owner=SummaryActionItemOwnerDraft(kind="unknown"),
+            ),
+        ),
+        open_questions=(SummaryOpenQuestionDraft(text="Who owns rollout?"),),
+    )
+
+    queue.mark_summarization_succeeded(meeting=meeting, summary=summary)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert len(statements) == 2
+    upsert_sql, upsert_params = statements[0]
+    assert upsert_sql.startswith("insert into summaries")
+    assert "on conflict (meeting_id) do update" in upsert_sql
+    assert isinstance(upsert_params, dict)
+    assert upsert_params["meeting_id"] == meeting.id
+    assert upsert_params["overview"] == "Meeting overview"
+    assert upsert_params["decisions"].obj == [{"text": "Ship it"}]
+    assert upsert_params["action_items"].obj == [
+        {"task": "Send notes", "owner": {"kind": "speaker", "value": "SPEAKER_00"}},
+        {"task": "Publish recap", "owner": {"kind": "unknown"}},
+    ]
+    assert upsert_params["open_questions"].obj == [{"text": "Who owns rollout?"}]
+    update_sql, update_params = statements[1]
+    assert "status = 'done'" in update_sql
+    assert "transcription_progress = 100" in update_sql
+    assert "error_kind = null" in update_sql
+    assert "error_message = null" in update_sql
+    assert "failed_at_stage = null" in update_sql
+    assert "where id = %(meeting_id)s and status = 'summarizing'" in update_sql
+    assert update_params == {"meeting_id": meeting.id}
+
+
+def test_mark_summarization_succeeded_raises_when_final_status_update_misses() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 0])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.SUMMARIZING,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+    )
+
+    with pytest.raises(RuntimeError, match="updated 0 rows"):
+        queue.mark_summarization_succeeded(
+            meeting=meeting,
+            summary=SummaryDraft(
+                overview="Overview",
+                decisions=(),
+                action_items=(),
+                open_questions=(),
+            ),
+        )
 
 
 def test_mark_transcription_succeeded_raises_when_final_status_update_misses() -> None:
@@ -613,6 +729,19 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
             """
         )
         admin.execute(
+            """
+            create table summaries (
+              meeting_id uuid primary key references meetings(id) on delete cascade,
+              overview text not null default '',
+              decisions jsonb not null default '[]'::jsonb,
+              action_items jsonb not null default '[]'::jsonb,
+              open_questions jsonb not null default '[]'::jsonb,
+              created_at timestamptz not null default now(),
+              updated_at timestamptz not null default now()
+            )
+            """
+        )
+        admin.execute(
             "insert into meetings (id, status, created_at) values (%s, 'transcribing', now())",
             [row_id],
         )
@@ -765,7 +894,77 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
             ("SPEAKER_01", "replacement one"),
             ("SPEAKER_00", "replacement two"),
         ]
-        assert meeting_row == ("done", 100)
+        assert meeting_row == ("summarizing", 100)
+
+        summarizing_meeting = QueuedMeeting(
+            id=row_id,
+            status=MeetingStatus.SUMMARIZING,
+            resume_from_stage=None,
+            transcription_progress=100,
+            error_kind=None,
+            error_message=None,
+            failed_at_stage=None,
+        )
+        queue.mark_summarization_succeeded(
+            meeting=summarizing_meeting,
+            summary=SummaryDraft(
+                overview="stale overview",
+                decisions=(SummaryDecisionDraft(text="stale decision"),),
+                action_items=(),
+                open_questions=(),
+            ),
+        )
+        with connection_factory() as connection:
+            connection.execute(
+                "update meetings set status = 'summarizing' where id = %s", [row_id]
+            )
+            connection.commit()
+
+        queue.mark_summarization_succeeded(
+            meeting=summarizing_meeting,
+            summary=SummaryDraft(
+                overview="replacement overview",
+                decisions=(SummaryDecisionDraft(text="replacement decision"),),
+                action_items=(
+                    SummaryActionItemDraft(
+                        task="Follow up",
+                        owner=SummaryActionItemOwnerDraft(
+                            kind="speaker", value="SPEAKER_01"
+                        ),
+                    ),
+                ),
+                open_questions=(SummaryOpenQuestionDraft(text="Replacement question?"),),
+            ),
+        )
+
+        with connection_factory() as connection:
+            summary_rows = connection.execute(
+                """
+                select overview, decisions, action_items, open_questions
+                from summaries
+                where meeting_id = %s
+                """,
+                [row_id],
+            ).fetchall()
+            done_meeting_row = connection.execute(
+                "select status, transcription_progress from meetings where id = %s",
+                [row_id],
+            ).fetchone()
+
+        assert summary_rows == [
+            (
+                "replacement overview",
+                [{"text": "replacement decision"}],
+                [
+                    {
+                        "task": "Follow up",
+                        "owner": {"kind": "speaker", "value": "SPEAKER_01"},
+                    }
+                ],
+                [{"text": "Replacement question?"}],
+            )
+        ]
+        assert done_meeting_row == ("done", 100)
     finally:
         with psycopg.connect(database_url, autocommit=True) as admin:
             admin.execute(f'drop schema if exists "{schema_name}" cascade')

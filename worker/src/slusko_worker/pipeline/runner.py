@@ -11,6 +11,7 @@ from slusko_worker.db.models import (
     ErrorKind,
     MeetingStatus,
     QueuedMeeting,
+    SummaryDraft,
     TranscriptSegmentDraft,
 )
 from slusko_worker.pipeline.errors import PipelineError
@@ -46,6 +47,12 @@ class PipelineQueue(RecoveryQueue, Protocol):
 
     def mark_diarization_succeeded(
         self, *, meeting: QueuedMeeting, segments: Sequence[TranscriptSegmentDraft]
+    ) -> None: ...
+
+    def mark_summarization_started(self, meeting: QueuedMeeting) -> None: ...
+
+    def mark_summarization_succeeded(
+        self, *, meeting: QueuedMeeting, summary: SummaryDraft
     ) -> None: ...
 
     def mark_failure(
@@ -87,6 +94,15 @@ class Diarizer(Protocol):
     ) -> Sequence[TranscriptSegmentDraft]: ...
 
 
+class Summarizer(Protocol):
+    def summarize(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        transcript_segments: Sequence[TranscriptSegmentDraft],
+    ) -> SummaryDraft: ...
+
+
 class PipelineProcessor:
     """Dispatch claimed meetings to the currently implemented pipeline stages."""
 
@@ -97,12 +113,14 @@ class PipelineProcessor:
         normalizer: Normalizer,
         transcriber: Transcriber,
         diarizer: Diarizer,
+        summarizer: Summarizer,
         meetings_dir: str | Path,
     ) -> None:
         self._queue = queue
         self._normalizer = normalizer
         self._transcriber = transcriber
         self._diarizer = diarizer
+        self._summarizer = summarizer
         self._meetings_dir = Path(meetings_dir)
 
     def process(self, meeting: QueuedMeeting) -> None:
@@ -123,8 +141,12 @@ class PipelineProcessor:
             self._process_diarization_reentry(meeting)
             return
 
+        if meeting.status == MeetingStatus.SUMMARIZING:
+            self._process_summarization_reentry(meeting)
+            return
+
         logger.warning(
-            "meeting %s claimed at %s, but recovery beyond transcription is not implemented",
+            "meeting %s claimed at %s, but recovery is not implemented",
             meeting.id,
             meeting.status.value,
         )
@@ -185,7 +207,9 @@ class PipelineProcessor:
             return
 
         self._queue.mark_transcription_succeeded(meeting=meeting, segments=segments)
-        transcript_segments = self._load_transcript_segments_for_diarization(meeting)
+        transcript_segments = self._load_transcript_segments_for_stage(
+            meeting=meeting, failed_at_stage=MeetingStatus.DIARIZING
+        )
         if transcript_segments is None:
             return
         self._process_diarization(
@@ -195,7 +219,9 @@ class PipelineProcessor:
         )
 
     def _process_diarization_reentry(self, meeting: QueuedMeeting) -> None:
-        transcript_segments = self._load_transcript_segments_for_diarization(meeting)
+        transcript_segments = self._load_transcript_segments_for_stage(
+            meeting=meeting, failed_at_stage=MeetingStatus.DIARIZING
+        )
         if transcript_segments is None:
             return
 
@@ -205,8 +231,20 @@ class PipelineProcessor:
             transcript_segments=transcript_segments,
         )
 
-    def _load_transcript_segments_for_diarization(
-        self, meeting: QueuedMeeting
+    def _process_summarization_reentry(self, meeting: QueuedMeeting) -> None:
+        transcript_segments = self._load_transcript_segments_for_stage(
+            meeting=meeting, failed_at_stage=MeetingStatus.SUMMARIZING
+        )
+        if transcript_segments is None:
+            return
+
+        self._process_summarization(
+            meeting=meeting,
+            transcript_segments=transcript_segments,
+        )
+
+    def _load_transcript_segments_for_stage(
+        self, *, meeting: QueuedMeeting, failed_at_stage: MeetingStatus
     ) -> list[TranscriptSegmentDraft] | None:
         try:
             return self._queue.load_transcript_segments(meeting)
@@ -216,7 +254,7 @@ class PipelineProcessor:
                 meeting=meeting,
                 error_kind=ErrorKind.UNKNOWN,
                 error_message=str(error) or error.__class__.__name__,
-                failed_at_stage=MeetingStatus.DIARIZING,
+                failed_at_stage=failed_at_stage,
             )
             return None
 
@@ -250,6 +288,37 @@ class PipelineProcessor:
         self._queue.mark_diarization_succeeded(
             meeting=meeting, segments=diarized_segments
         )
+        self._process_summarization(
+            meeting=meeting,
+            transcript_segments=diarized_segments,
+        )
+
+    def _process_summarization(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        transcript_segments: Sequence[TranscriptSegmentDraft],
+    ) -> None:
+        self._queue.mark_summarization_started(meeting)
+        try:
+            summary = self._summarizer.summarize(
+                meeting=meeting,
+                transcript_segments=transcript_segments,
+            )
+        except PipelineError as error:
+            self._write_pipeline_failure(meeting, error)
+            return
+        except Exception as error:
+            logger.exception("unexpected summarization failure for meeting %s", meeting.id)
+            self._queue.mark_failure(
+                meeting=meeting,
+                error_kind=ErrorKind.UNKNOWN,
+                error_message=str(error) or error.__class__.__name__,
+                failed_at_stage=MeetingStatus.SUMMARIZING,
+            )
+            return
+
+        self._queue.mark_summarization_succeeded(meeting=meeting, summary=summary)
 
     def _safe_mark_transcription_progress(
         self, *, meeting: QueuedMeeting, progress: int

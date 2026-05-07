@@ -3,6 +3,7 @@ import {
   loadMeetingDetail,
   loadMeetingDetailRouteData,
   type MeetingDetailRow,
+  type SummaryRow,
   type TranscriptSegmentRow,
 } from "./meetings-list.server";
 
@@ -22,6 +23,24 @@ function detailRow(
     failedAtStage: "normalizing",
     createdAt: new Date("2026-05-05T10:00:00.000Z"),
     updatedAt: new Date("2026-05-05T10:02:00.000Z"),
+    ...overrides,
+  };
+}
+
+function summaryRow(overrides: Partial<SummaryRow> = {}): SummaryRow {
+  return {
+    overview: "Discussed launch readiness and blocker follow-ups.",
+    decisions: [{ text: "Proceed with staged rollout." }],
+    actionItems: [
+      {
+        task: "Prepare release notes",
+        owner: { kind: "name", value: "Atila" },
+      },
+    ],
+    openQuestions: [
+      { text: "Do we include beta metrics in the public changelog?" },
+    ],
+    updatedAt: new Date("2026-05-05T10:03:00.000Z"),
     ...overrides,
   };
 }
@@ -88,6 +107,7 @@ describe("meeting detail loader helpers", () => {
 
     const routeData = await loadMeetingDetailRouteData(meetingId, {
       findMeetingById: async (id) => (id === meetingId ? detailRow() : null),
+      findSummaryByMeetingId: async () => summaryRow(),
       findTranscriptSegmentsByMeetingId: async (id) => {
         transcriptCalls.push(id);
         return [
@@ -103,6 +123,20 @@ describe("meeting detail loader helpers", () => {
     });
 
     expect(routeData.meeting.id).toBe(meetingId);
+    expect(routeData.summary).toEqual({
+      overview: "Discussed launch readiness and blocker follow-ups.",
+      decisions: [{ text: "Proceed with staged rollout." }],
+      actionItems: [
+        {
+          task: "Prepare release notes",
+          owner: { kind: "name", value: "Atila" },
+        },
+      ],
+      openQuestions: [
+        { text: "Do we include beta metrics in the public changelog?" },
+      ],
+      updatedAt: "2026-05-05T10:03:00.000Z",
+    });
     expect(routeData.transcriptSegments).toEqual([
       {
         id: "00000000-0000-4000-8000-00000000a002",
@@ -125,9 +159,11 @@ describe("meeting detail loader helpers", () => {
   test("route data helper returns an empty transcript when no segments exist", async () => {
     const routeData = await loadMeetingDetailRouteData(meetingId, {
       findMeetingById: async () => detailRow(),
+      findSummaryByMeetingId: async () => null,
       findTranscriptSegmentsByMeetingId: async () => [],
     });
 
+    expect(routeData.summary).toBeNull();
     expect(routeData.transcriptSegments).toEqual([]);
   });
 

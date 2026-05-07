@@ -17,6 +17,7 @@ from slusko_worker.db.queue import PostgresMeetingQueue
 from slusko_worker.pipeline.diarization import PyannoteDiarizer
 from slusko_worker.pipeline.normalization import AudioNormalizer
 from slusko_worker.pipeline.runner import PipelineProcessor
+from slusko_worker.pipeline.summarization import OpenRouterSummarizer
 from slusko_worker.pipeline.transcription import WhisperTranscriber
 from slusko_worker.queue_loop import QueueLoop, listener_connection_factory
 
@@ -97,11 +98,18 @@ def run() -> int:
         hf_token=config.huggingface_token,
         model_cache_dir=config.model_cache_dir,
     )
+    summarizer = OpenRouterSummarizer(
+        api_key=config.openrouter_api_key,
+        model=config.openrouter_model,
+        base_url=config.openrouter_base_url,
+        timeout_seconds=config.openrouter_timeout_seconds,
+    )
     processor = PipelineProcessor(
         queue=queue,
         normalizer=AudioNormalizer(meetings_dir=config.meetings_dir),
         transcriber=transcriber,
         diarizer=diarizer,
+        summarizer=summarizer,
         meetings_dir=config.meetings_dir,
     )
     loop = QueueLoop(
@@ -128,6 +136,13 @@ def run() -> int:
         "pyannote configured with model=%s huggingface_token_present=%s",
         config.pyannote_model,
         bool(config.huggingface_token),
+    )
+    logger.info(
+        "openrouter configured with api_key_present=%s model=%s base_url=%s timeout=%.1fs",
+        bool(config.openrouter_api_key),
+        config.openrouter_model or "not configured",
+        config.openrouter_base_url,
+        config.openrouter_timeout_seconds,
     )
     logger.info(
         "queue polling fallback configured at %.0f seconds",

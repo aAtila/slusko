@@ -7,11 +7,17 @@ from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from slusko_worker.db.models import (
     ErrorKind,
     MeetingStatus,
     QueuedMeeting,
+    SummaryActionItemDraft,
+    SummaryActionItemOwnerDraft,
+    SummaryDecisionDraft,
+    SummaryDraft,
+    SummaryOpenQuestionDraft,
     TranscriptSegmentDraft,
 )
 
@@ -176,13 +182,61 @@ where id = %(meeting_id)s
 MARK_DIARIZATION_SUCCEEDED_SQL = """
 update meetings
 set
-  status = 'done',
+  status = 'summarizing',
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
   updated_at = now()
 where id = %(meeting_id)s
   and status = 'diarizing'
+"""
+
+MARK_SUMMARIZATION_STARTED_SQL = """
+update meetings
+set
+  status = 'summarizing',
+  error_kind = null,
+  error_message = null,
+  failed_at_stage = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'summarizing'
+"""
+
+UPSERT_SUMMARY_SQL = """
+insert into summaries (
+  meeting_id,
+  overview,
+  decisions,
+  action_items,
+  open_questions
+) values (
+  %(meeting_id)s,
+  %(overview)s,
+  %(decisions)s,
+  %(action_items)s,
+  %(open_questions)s
+)
+on conflict (meeting_id) do update
+set
+  overview = excluded.overview,
+  decisions = excluded.decisions,
+  action_items = excluded.action_items,
+  open_questions = excluded.open_questions,
+  updated_at = now()
+"""
+
+MARK_SUMMARIZATION_SUCCEEDED_SQL = """
+update meetings
+set
+  status = 'done',
+  transcription_progress = 100,
+  error_kind = null,
+  error_message = null,
+  failed_at_stage = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'summarizing'
 """
 
 MARK_FAILURE_SQL = """
@@ -335,7 +389,7 @@ class PostgresMeetingQueue:
         meeting: QueuedMeeting,
         segments: Sequence[TranscriptSegmentDraft],
     ) -> None:
-        """Idempotently replace diarized transcript rows and finish the meeting."""
+        """Idempotently replace diarized transcript rows and hand the meeting to summarization."""
 
         if not segments:
             raise ValueError("at least one transcript segment is required")
@@ -346,6 +400,38 @@ class PostgresMeetingQueue:
                     _replace_transcript_segments(cursor, meeting=meeting, segments=segments)
                     cursor.execute(
                         MARK_DIARIZATION_SUCCEEDED_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError(
+                            f"meeting status write updated {cursor.rowcount} rows"
+                        )
+
+    def mark_summarization_started(self, meeting: QueuedMeeting) -> None:
+        """Enter summarization without deleting transcript rows needed as input."""
+
+        self._execute(
+            MARK_SUMMARIZATION_STARTED_SQL,
+            {"meeting_id": meeting.id},
+        )
+
+    def mark_summarization_succeeded(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        summary: SummaryDraft,
+    ) -> None:
+        """Upsert the structured summary and finish the meeting idempotently."""
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        UPSERT_SUMMARY_SQL,
+                        _summary_params(meeting=meeting, summary=summary),
+                    )
+                    cursor.execute(
+                        MARK_SUMMARIZATION_SUCCEEDED_SQL,
                         {"meeting_id": meeting.id},
                     )
                     if cursor.rowcount != 1:
@@ -420,6 +506,45 @@ def _replace_transcript_segments(
                 "text": segment.text,
             },
         )
+
+
+def _summary_params(*, meeting: QueuedMeeting, summary: SummaryDraft) -> dict[str, object]:
+    return {
+        "meeting_id": meeting.id,
+        "overview": summary.overview,
+        "decisions": Jsonb(_decision_payloads(summary.decisions)),
+        "action_items": Jsonb(_action_item_payloads(summary.action_items)),
+        "open_questions": Jsonb(_open_question_payloads(summary.open_questions)),
+    }
+
+
+def _decision_payloads(
+    decisions: Sequence[SummaryDecisionDraft],
+) -> list[dict[str, str]]:
+    return [{"text": decision.text} for decision in decisions]
+
+
+def _action_item_payloads(
+    action_items: Sequence[SummaryActionItemDraft],
+) -> list[dict[str, object]]:
+    return [
+        {"task": action_item.task, "owner": _owner_payload(action_item.owner)}
+        for action_item in action_items
+    ]
+
+
+def _owner_payload(owner: SummaryActionItemOwnerDraft) -> dict[str, str]:
+    if owner.kind == "unknown":
+        return {"kind": "unknown"}
+    if owner.value is None:
+        raise ValueError(f"summary owner kind {owner.kind!r} requires value")
+    return {"kind": owner.kind, "value": owner.value}
+
+
+def _open_question_payloads(
+    open_questions: Sequence[SummaryOpenQuestionDraft],
+) -> list[dict[str, str]]:
+    return [{"text": question.text} for question in open_questions]
 
 
 def _meeting_from_row(row: dict[str, object]) -> QueuedMeeting:

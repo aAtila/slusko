@@ -23,6 +23,10 @@ def test_load_config_sets_listener_autocommit_and_tcp_keepalives() -> None:
     assert config.whisper_compute_type == "auto"
     assert config.pyannote_model == "pyannote/speaker-diarization-3.1"
     assert config.huggingface_token is None
+    assert config.openrouter_api_key is None
+    assert config.openrouter_model is None
+    assert config.openrouter_base_url == "https://openrouter.ai/api/v1"
+    assert config.openrouter_timeout_seconds == 120.0
     assert config.transcription_progress_min_delta == 5
     assert config.transcription_progress_min_interval_seconds == 5.0
 
@@ -138,3 +142,31 @@ def test_load_config_prefers_huggingface_token_over_hf_token() -> None:
     )
 
     assert config.huggingface_token == "primary-token"
+
+
+def test_load_config_parses_openrouter_settings() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "OPENROUTER_API_KEY": "openrouter-key",
+            "OPENROUTER_MODEL": "anthropic/claude-sonnet-4",
+            "OPENROUTER_BASE_URL": "https://openrouter.test/api/v1",
+            "OPENROUTER_TIMEOUT_SECONDS": "45.5",
+        }
+    )
+
+    assert config.openrouter_api_key == "openrouter-key"
+    assert config.openrouter_model == "anthropic/claude-sonnet-4"
+    assert config.openrouter_base_url == "https://openrouter.test/api/v1"
+    assert config.openrouter_timeout_seconds == 45.5
+
+
+def test_load_config_falls_back_for_invalid_openrouter_timeout() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "OPENROUTER_TIMEOUT_SECONDS": "0",
+        }
+    )
+
+    assert config.openrouter_timeout_seconds == 120.0

@@ -8,7 +8,7 @@ import {
   useNavigation,
   useRevalidator,
 } from "react-router";
-import type { MeetingStatus } from "~/db/schema";
+import type { MeetingStatus, SummaryActionItemOwner } from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import {
   formatDuration,
@@ -17,6 +17,7 @@ import {
   isTerminalMeetingStatus,
   type MeetingDetail,
   type MeetingStatusTone,
+  type MeetingSummary,
   type TranscriptSegment,
 } from "~/lib/meetings-list";
 import type { Route } from "./+types/meetings.$meetingId";
@@ -62,7 +63,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 export default function MeetingDetailPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { meeting, transcriptSegments } = loaderData;
+  const { meeting, summary, transcriptSegments } = loaderData;
   const actionData = useActionData<MeetingActionData>();
   const navigation = useNavigation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -248,10 +249,7 @@ export default function MeetingDetailPage({
         </section>
 
         <section className="mt-8 grid gap-6">
-          <PlaceholderPanel
-            description="Meeting summaries will appear here after the summarization pipeline is connected."
-            title="Summary"
-          />
+          <SummaryPanel summary={summary} status={meeting.status} />
           <TranscriptPanel
             segments={transcriptSegments}
             status={meeting.status}
@@ -328,19 +326,125 @@ function TitleFeedback({
   );
 }
 
-function PlaceholderPanel({
-  description,
+export function SummaryPanel({
+  summary,
+  status,
+}: {
+  summary: MeetingSummary | null;
+  status: MeetingStatus;
+}) {
+  let emptyMessage = "Summary will appear here after summarization finishes.";
+
+  if (status === "error") {
+    emptyMessage = "No summary was saved before processing failed.";
+  } else if (status === "done") {
+    emptyMessage = "Summary is not available for this meeting.";
+  }
+
+  return (
+    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70">
+      <h2 className="text-2xl font-semibold text-slate-900">Summary</h2>
+      {summary === null ? (
+        <p className="mt-3 text-sm leading-6 text-slate-600">{emptyMessage}</p>
+      ) : (
+        <div className="mt-4 space-y-5">
+          <section>
+            <h3 className="text-sm font-semibold tracking-[0.2em] text-slate-500 uppercase">
+              Overview
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-800">
+              {summary.overview}
+            </p>
+          </section>
+
+          <SummaryList
+            emptyText="No decisions recorded."
+            items={summary.decisions.map((decision, index) => ({
+              id: `decision-${index}`,
+              content: decision.text,
+            }))}
+            title="Decisions"
+          />
+
+          <section>
+            <h3 className="text-sm font-semibold tracking-[0.2em] text-slate-500 uppercase">
+              Action items
+            </h3>
+            {summary.actionItems.length === 0 ? (
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                No action items recorded.
+              </p>
+            ) : (
+              <ol className="mt-2 space-y-2">
+                {summary.actionItems.map((item, index) => (
+                  <li
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                    key={`action-item-${index}`}
+                  >
+                    <p className="text-sm leading-6 text-slate-800">
+                      {item.task}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Owner: {renderActionItemOwner(item.owner)}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
+          <SummaryList
+            emptyText="No open questions recorded."
+            items={summary.openQuestions.map((question, index) => ({
+              id: `open-question-${index}`,
+              content: question.text,
+            }))}
+            title="Open questions"
+          />
+        </div>
+      )}
+    </article>
+  );
+}
+
+function SummaryList({
+  emptyText,
+  items,
   title,
 }: {
-  description: string;
+  emptyText: string;
+  items: { content: string; id: string }[];
   title: string;
 }) {
   return (
-    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70">
-      <h2 className="text-2xl font-semibold text-slate-900">{title}</h2>
-      <p className="mt-3 text-sm leading-6 text-slate-600">{description}</p>
-    </article>
+    <section>
+      <h3 className="text-sm font-semibold tracking-[0.2em] text-slate-500 uppercase">
+        {title}
+      </h3>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm leading-6 text-slate-600">{emptyText}</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.map((item) => (
+            <li
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-800"
+              key={item.id}
+            >
+              {item.content}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
+}
+
+function renderActionItemOwner(owner: SummaryActionItemOwner) {
+  if (owner.kind === "unknown") {
+    return "Unassigned";
+  }
+
+  return owner.value;
 }
 
 export function TranscriptPanel({

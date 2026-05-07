@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { MeetingStatus } from "~/db/schema";
-import type { TranscriptSegment } from "~/lib/meetings-list";
-import { TranscriptPanel } from "./meetings.$meetingId";
+import type { MeetingSummary, TranscriptSegment } from "~/lib/meetings-list";
+import { SummaryPanel, TranscriptPanel } from "./meetings.$meetingId";
 
 function renderTranscriptPanel({
   segments,
@@ -15,6 +15,70 @@ function renderTranscriptPanel({
     <TranscriptPanel segments={segments} status={status} />,
   );
 }
+
+function renderSummaryPanel({
+  summary,
+  status,
+}: {
+  summary: MeetingSummary | null;
+  status: MeetingStatus;
+}) {
+  return renderToStaticMarkup(
+    <SummaryPanel summary={summary} status={status} />,
+  );
+}
+
+describe("SummaryPanel", () => {
+  test("renders overview, decisions, action items, and open questions read-only", () => {
+    const markup = renderSummaryPanel({
+      status: "done",
+      summary: {
+        overview: "Team aligned on release readiness.",
+        decisions: [{ text: "Ship on Friday." }],
+        actionItems: [
+          {
+            task: "Publish release notes",
+            owner: { kind: "name", value: "Atila" },
+          },
+          {
+            task: "Notify stakeholders",
+            owner: { kind: "speaker", value: "SPEAKER_01" },
+          },
+          { task: "Document follow-up", owner: { kind: "unknown" } },
+        ],
+        openQuestions: [{ text: "Should we include optional migration docs?" }],
+        updatedAt: "2026-05-07T20:00:00.000Z",
+      },
+    });
+
+    expect(markup).toContain("Summary");
+    expect(markup).toContain("Overview");
+    expect(markup).toContain("Team aligned on release readiness.");
+    expect(markup).toContain("Decisions");
+    expect(markup).toContain("Ship on Friday.");
+    expect(markup).toContain("Action items");
+    expect(markup).toContain("Owner: Atila");
+    expect(markup).toContain("Owner: SPEAKER_01");
+    expect(markup).toContain("Owner: Unassigned");
+    expect(markup).toContain("Open questions");
+    expect(markup).toContain("Should we include optional migration docs?");
+    expect(markup).not.toContain("<input");
+    expect(markup).not.toContain("<textarea");
+    expect(markup).not.toContain("contenteditable");
+  });
+
+  test("renders status-aware empty state copy", () => {
+    expect(
+      renderSummaryPanel({ summary: null, status: "summarizing" }),
+    ).toContain("Summary will appear here after summarization finishes.");
+    expect(renderSummaryPanel({ summary: null, status: "error" })).toContain(
+      "No summary was saved before processing failed.",
+    );
+    expect(renderSummaryPanel({ summary: null, status: "done" })).toContain(
+      "Summary is not available for this meeting.",
+    );
+  });
+});
 
 describe("TranscriptPanel", () => {
   test("renders timestamped transcript rows as read-only content", () => {

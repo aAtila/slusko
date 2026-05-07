@@ -17,6 +17,10 @@ class WorkerConfig:
     whisper_compute_type: str = "auto"
     pyannote_model: str = "pyannote/speaker-diarization-3.1"
     huggingface_token: str | None = None
+    openrouter_api_key: str | None = None
+    openrouter_model: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_timeout_seconds: float = 120.0
     transcription_progress_min_delta: int = 5
     transcription_progress_min_interval_seconds: float = 5.0
     poll_interval_seconds: float = 300
@@ -69,6 +73,14 @@ def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
         whisper_compute_type=env.get("WHISPER_COMPUTE_TYPE", "auto"),
         pyannote_model=env.get("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1"),
         huggingface_token=env.get("HUGGINGFACE_TOKEN") or env.get("HF_TOKEN"),
+        openrouter_api_key=env.get("OPENROUTER_API_KEY") or None,
+        openrouter_model=env.get("OPENROUTER_MODEL") or None,
+        openrouter_base_url=env.get(
+            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+        ),
+        openrouter_timeout_seconds=_positive_float(
+            env.get("OPENROUTER_TIMEOUT_SECONDS"), default=120.0
+        ),
         transcription_progress_min_delta=_positive_int(
             env.get("TRANSCRIPTION_PROGRESS_MIN_DELTA"), default=5
         ),
@@ -89,6 +101,18 @@ def _positive_int(value: str | None, *, default: int) -> int:
         return default
     try:
         parsed = int(value)
+    except ValueError:
+        return default
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _positive_float(value: str | None, *, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
     except ValueError:
         return default
     if parsed <= 0:

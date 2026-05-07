@@ -1,15 +1,20 @@
 import { asc, desc, eq } from "drizzle-orm";
 import {
   meetings,
+  summaries,
   transcriptSegments,
   type ErrorKind,
   type MeetingStatus,
+  type SummaryActionItem,
+  type SummaryDecision,
+  type SummaryOpenQuestion,
 } from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
 import type {
   HomeMeetingListItem,
   MeetingDetail,
   MeetingDetailRouteData,
+  MeetingSummary,
   TranscriptSegment,
 } from "./meetings-list";
 
@@ -29,10 +34,19 @@ export type MeetingDetailRow = HomeMeetingListRow & {
   updatedAt: Date;
 };
 
+export type SummaryRow = {
+  overview: string;
+  decisions: SummaryDecision[];
+  actionItems: SummaryActionItem[];
+  openQuestions: SummaryOpenQuestion[];
+  updatedAt: Date;
+};
+
 export type TranscriptSegmentRow = TranscriptSegment;
 
 type MeetingDetailLoaderOptions = {
   findMeetingById?: (meetingId: string) => Promise<MeetingDetailRow | null>;
+  findSummaryByMeetingId?: (meetingId: string) => Promise<SummaryRow | null>;
   findTranscriptSegmentsByMeetingId?: (
     meetingId: string,
   ) => Promise<TranscriptSegmentRow[]>;
@@ -80,6 +94,9 @@ export async function loadMeetingDetailRouteData(
     throw new Response("Meeting not found", { status: 404 });
   }
 
+  const summaryRow = await (
+    options.findSummaryByMeetingId ?? findSummaryByMeetingId
+  )(meeting.id);
   const transcriptSegments = await (
     options.findTranscriptSegmentsByMeetingId ??
     findTranscriptSegmentsByMeetingId
@@ -87,6 +104,7 @@ export async function loadMeetingDetailRouteData(
 
   return {
     meeting,
+    summary: summaryRow === null ? null : serializeSummaryRow(summaryRow),
     transcriptSegments: transcriptSegments.map(serializeTranscriptSegmentRow),
   };
 }
@@ -132,6 +150,16 @@ function serializeMeetingDetailRow(row: MeetingDetailRow): MeetingDetail {
   };
 }
 
+function serializeSummaryRow(row: SummaryRow): MeetingSummary {
+  return {
+    overview: row.overview,
+    decisions: row.decisions,
+    actionItems: row.actionItems,
+    openQuestions: row.openQuestions,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 function serializeTranscriptSegmentRow(
   row: TranscriptSegmentRow,
 ): TranscriptSegment {
@@ -142,6 +170,25 @@ function serializeTranscriptSegmentRow(
     speakerLabel: row.speakerLabel,
     text: row.text,
   };
+}
+
+async function findSummaryByMeetingId(
+  meetingId: string,
+): Promise<SummaryRow | null> {
+  const database = await getDatabase();
+  const [row] = await database
+    .select({
+      overview: summaries.overview,
+      decisions: summaries.decisions,
+      actionItems: summaries.actionItems,
+      openQuestions: summaries.openQuestions,
+      updatedAt: summaries.updatedAt,
+    })
+    .from(summaries)
+    .where(eq(summaries.meetingId, meetingId))
+    .limit(1);
+
+  return row ?? null;
 }
 
 async function findTranscriptSegmentsByMeetingId(
