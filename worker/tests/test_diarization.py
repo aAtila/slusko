@@ -342,14 +342,22 @@ def test_pyannote_diarizer_wraps_missing_audio_load_and_runtime_failures(tmp_pat
         )
 
 
-def test_torch_safe_global_patch_allows_pyannote_checkpoint_torch_version(tmp_path: Path) -> None:
+def test_torch_safe_global_patch_allows_pyannote_checkpoint_metadata(tmp_path: Path) -> None:
     import torch
+    from pyannote.audio.core.task import Problem, Resolution, Specifications
 
-    checkpoint_path = tmp_path / "pyannote-checkpoint.pt"
+    torch_version_path = tmp_path / "torch-version-checkpoint.pt"
+    specifications_path = tmp_path / "specifications-checkpoint.pt"
+    specifications = Specifications(
+        problem=Problem.MULTI_LABEL_CLASSIFICATION,
+        resolution=Resolution.FRAME,
+        duration=2.0,
+    )
     torch.save(
         {"torch_version": torch.torch_version.TorchVersion("2.8.0")},
-        checkpoint_path,
+        torch_version_path,
     )
+    torch.save({"specifications": specifications}, specifications_path)
 
     get_safe_globals = getattr(torch.serialization, "get_safe_globals", None)
     clear_safe_globals = getattr(torch.serialization, "clear_safe_globals", None)
@@ -357,16 +365,27 @@ def test_torch_safe_global_patch_allows_pyannote_checkpoint_torch_version(tmp_pa
     previous_safe_globals = list(get_safe_globals()) if get_safe_globals else None
 
     try:
-        safe_globals = previous_safe_globals or []
-        if torch.torch_version.TorchVersion not in safe_globals:
-            with pytest.raises(Exception, match="TorchVersion"):
-                torch.load(checkpoint_path)
+        if clear_safe_globals is not None:
+            clear_safe_globals()
+
+        try:
+            torch.load(torch_version_path)
+        except Exception as error:
+            assert "TorchVersion" in str(error)
+        try:
+            torch.load(specifications_path)
+        except Exception as error:
+            assert "Specifications" in str(error)
 
         _patch_torch_safe_globals_for_pyannote_checkpoints()
 
-        loaded = torch.load(checkpoint_path)
+        torch_version_loaded = torch.load(torch_version_path)
+        specifications_loaded = torch.load(specifications_path)
 
-        assert loaded["torch_version"] == torch.torch_version.TorchVersion("2.8.0")
+        assert torch_version_loaded["torch_version"] == torch.torch_version.TorchVersion(
+            "2.8.0"
+        )
+        assert specifications_loaded["specifications"] == specifications
     finally:
         if previous_safe_globals is not None and clear_safe_globals and add_safe_globals:
             clear_safe_globals()

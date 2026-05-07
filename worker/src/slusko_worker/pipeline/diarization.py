@@ -153,12 +153,11 @@ def default_pipeline_factory(*args: Any, **kwargs: Any) -> PyannotePipelineLike:
 
 
 def _patch_torch_safe_globals_for_pyannote_checkpoints() -> None:
-    """Allow pyannote checkpoints to load under PyTorch's safe default loader.
+    """Allow trusted pyannote metadata under PyTorch's safe default loader.
 
     PyTorch 2.6 changed ``torch.load`` to default to ``weights_only=True``.
-    Some trusted pyannote checkpoints contain Torch's own ``TorchVersion``
-    metadata object, which is not allowlisted by default and otherwise fails
-    before diarization can start.
+    Some trusted pyannote checkpoints contain metadata objects that are not
+    allowlisted by default and otherwise fail before diarization can start.
     """
 
     try:
@@ -170,14 +169,31 @@ def _patch_torch_safe_globals_for_pyannote_checkpoints() -> None:
         ) from error
 
     add_safe_globals = getattr(torch.serialization, "add_safe_globals", None)
-    torch_version = getattr(torch, "torch_version", None)
-    torch_version_type = getattr(torch_version, "TorchVersion", None)
-    if add_safe_globals is None or torch_version_type is None:
+    if add_safe_globals is None:
         return
 
-    # Keep this allowlist intentionally narrow: TorchVersion is PyTorch's own
-    # metadata type in trusted pyannote checkpoints, not a generic pickle bypass.
-    add_safe_globals([torch_version_type])
+    safe_globals: list[type[Any]] = []
+    torch_version = getattr(torch, "torch_version", None)
+    torch_version_type = getattr(torch_version, "TorchVersion", None)
+    if torch_version_type is not None:
+        safe_globals.append(torch_version_type)
+
+    try:
+        task_module = importlib.import_module("pyannote.audio.core.task")
+    except ImportError:
+        task_module = None
+    if task_module is not None:
+        for type_name in ("Specifications", "Problem", "Resolution"):
+            safe_global = getattr(task_module, type_name, None)
+            if safe_global is not None:
+                safe_globals.append(safe_global)
+
+    if not safe_globals:
+        return
+
+    # Keep this allowlist intentionally narrow: these are Torch/pyannote metadata
+    # types in trusted model checkpoints, not a generic pickle bypass.
+    add_safe_globals(safe_globals)
 
 
 def _patch_pyannote_hf_hub_download_auth_keyword() -> None:
