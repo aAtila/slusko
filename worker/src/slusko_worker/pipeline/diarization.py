@@ -148,7 +148,36 @@ def default_pipeline_factory(*args: Any, **kwargs: Any) -> PyannotePipelineLike:
             config_missing=True,
         ) from error
     _patch_pyannote_hf_hub_download_auth_keyword()
+    _patch_torch_safe_globals_for_pyannote_checkpoints()
     return Pipeline.from_pretrained(*args, **kwargs)
+
+
+def _patch_torch_safe_globals_for_pyannote_checkpoints() -> None:
+    """Allow pyannote checkpoints to load under PyTorch's safe default loader.
+
+    PyTorch 2.6 changed ``torch.load`` to default to ``weights_only=True``.
+    Some trusted pyannote checkpoints contain Torch's own ``TorchVersion``
+    metadata object, which is not allowlisted by default and otherwise fails
+    before diarization can start.
+    """
+
+    try:
+        import torch
+    except ImportError as error:
+        raise DiarizationFailed(
+            "Required Python package is missing: torch",
+            config_missing=True,
+        ) from error
+
+    add_safe_globals = getattr(torch.serialization, "add_safe_globals", None)
+    torch_version = getattr(torch, "torch_version", None)
+    torch_version_type = getattr(torch_version, "TorchVersion", None)
+    if add_safe_globals is None or torch_version_type is None:
+        return
+
+    # Keep this allowlist intentionally narrow: TorchVersion is PyTorch's own
+    # metadata type in trusted pyannote checkpoints, not a generic pickle bypass.
+    add_safe_globals([torch_version_type])
 
 
 def _patch_pyannote_hf_hub_download_auth_keyword() -> None:

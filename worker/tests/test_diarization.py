@@ -18,6 +18,7 @@ from slusko_worker.pipeline.diarization import (
     PyannoteDiarizer,
     _hf_hub_download_with_pyannote_auth_keyword,
     _patch_pyannote_hf_hub_download_auth_keyword,
+    _patch_torch_safe_globals_for_pyannote_checkpoints,
     assign_speakers,
 )
 from slusko_worker.pipeline.errors import DiarizationFailed
@@ -339,6 +340,37 @@ def test_pyannote_diarizer_wraps_missing_audio_load_and_runtime_failures(tmp_pat
             normalized_path=normalized_file(tmp_path),
             transcript_segments=[transcript(0.0, 1.0, "hello")],
         )
+
+
+def test_torch_safe_global_patch_allows_pyannote_checkpoint_torch_version(tmp_path: Path) -> None:
+    import torch
+
+    checkpoint_path = tmp_path / "pyannote-checkpoint.pt"
+    torch.save(
+        {"torch_version": torch.torch_version.TorchVersion("2.8.0")},
+        checkpoint_path,
+    )
+
+    get_safe_globals = getattr(torch.serialization, "get_safe_globals", None)
+    clear_safe_globals = getattr(torch.serialization, "clear_safe_globals", None)
+    add_safe_globals = getattr(torch.serialization, "add_safe_globals", None)
+    previous_safe_globals = list(get_safe_globals()) if get_safe_globals else None
+
+    try:
+        safe_globals = previous_safe_globals or []
+        if torch.torch_version.TorchVersion not in safe_globals:
+            with pytest.raises(Exception, match="TorchVersion"):
+                torch.load(checkpoint_path)
+
+        _patch_torch_safe_globals_for_pyannote_checkpoints()
+
+        loaded = torch.load(checkpoint_path)
+
+        assert loaded["torch_version"] == torch.torch_version.TorchVersion("2.8.0")
+    finally:
+        if previous_safe_globals is not None and clear_safe_globals and add_safe_globals:
+            clear_safe_globals()
+            add_safe_globals(previous_safe_globals)
 
 
 def test_pyannote_auth_compatibility_maps_legacy_keyword_to_modern_hub_token() -> None:
