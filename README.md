@@ -40,7 +40,7 @@ Required production environment variables:
 
 Deploy flow in Coolify:
 
-1. Configure a pre-deployment command: `bun run db:migrate`.
+1. Configure the Coolify pre-deployment command to run `bun run db:migrate` in the web app/migration environment with the same manually configured `DATABASE_URL`.
 2. Keep `docker-compose.prod.yml` as the app stack definition for `web` and `worker`.
 
 If migrations fail, Coolify aborts the rollout before new `web`/`worker` containers are exposed.
