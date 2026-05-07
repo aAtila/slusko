@@ -41,6 +41,7 @@ services:
       MEETINGS_DIR: /data/meetings
       MODEL_CACHE_DIR: /data/models
       HF_HOME: /data/models
+      HF_TOKEN: ${HF_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy

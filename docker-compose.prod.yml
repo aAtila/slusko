@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-slusko}
+      POSTGRES_USER: ${POSTGRES_USER:-slusko}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-slusko} -d ${POSTGRES_DB:-slusko}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: ./web
+      target: build
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: bun run db:migrate
+
+  web:
+    build:
+      context: ./web
+      target: production
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      NODE_ENV: production
+      PORT: 5173
+    expose:
+      - "5173"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - slusko_meetings:/data/meetings
+
+  worker:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      MEETINGS_DIR: /data/meetings
+      MODEL_CACHE_DIR: /data/models
+      HF_HOME: /data/models
+      HF_TOKEN: ${HF_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - slusko_meetings:/data/meetings
+      - slusko_models:/data/models
+
+volumes:
+  postgres_data:
+  slusko_meetings:
+  slusko_models:

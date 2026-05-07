@@ -27,6 +27,30 @@ docker compose up web worker
 
 Web app: http://localhost:5173
 
+## Production deployment with Compose/Coolify
+
+Use `docker-compose.prod.yml` for production-style deployments. Unlike the local-dev `docker-compose.yml`, it builds the web `production` target, does not bind-mount `./web`, and lets `web/Dockerfile` run `bun run start`. It also includes a one-shot `migrate` service for Drizzle migrations.
+
+Required production environment variables:
+
+- `POSTGRES_PASSWORD`
+- `DATABASE_URL` (for the bundled Postgres service, use `postgres://<user>:<password>@postgres:5432/<db>`)
+- `HF_TOKEN` if diarization needs Hugging Face access
+
+One-time/per-deploy migration step:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm migrate
+```
+
+Then start the production stack:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+For Coolify, configure the resource as Docker Compose and point the compose file path to `docker-compose.prod.yml`.
+
 ## Stop the stack
 
 ```bash
