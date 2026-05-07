@@ -21,7 +21,7 @@
     "hooks:install": "lefthook install",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
-    "start": "react-router-serve ./build/server/index.js",
+    "start": "node ./node_modules/.bin/react-router-serve ./build/server/index.js",
     "test": "bun test",
     "typecheck": "react-router typegen && tsc"
   },
