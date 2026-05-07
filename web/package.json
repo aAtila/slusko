@@ -22,6 +22,7 @@
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
     "start": "node ./node_modules/.bin/react-router-serve ./build/server/index.js",
+    "start:local": "node --env-file=.env ./node_modules/.bin/react-router-serve ./build/server/index.js",
     "test": "bun test",
     "typecheck": "react-router typegen && tsc"
   },
