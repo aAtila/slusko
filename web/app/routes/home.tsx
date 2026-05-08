@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { data, Link, useFetcher } from "react-router";
+import { Icon, type IconName } from "~/components/app-icons";
+import { useAppShellChrome, type AppShellChrome } from "~/components/app-shell";
 import type { MeetingStatus } from "~/db/schema";
 import {
   formatDuration,
@@ -105,6 +107,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const completedMeetingsCount = meetings.filter(
     (meeting) => meeting.status === "done",
   ).length;
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
   useEffect(() => {
     queryClient.setQueryData<HomeMeetingsResponse>(homeMeetingsQueryKey, {
@@ -118,248 +123,144 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     }
   }, [fetcher.data, fetcher.state, queryClient]);
 
-  const submitRecording = (file: File | null | undefined) => {
-    if (isUploading) {
-      setClientError("Wait for the current upload to finish.");
-      return;
-    }
+  const submitRecording = useCallback(
+    (file: File | null | undefined) => {
+      if (isUploading) {
+        setClientError("Wait for the current upload to finish.");
+        return;
+      }
 
-    const validationError = validateRecordingFile(file);
-    if (validationError !== null || !file) {
-      setClientError(validationError);
-      return;
-    }
+      const validationError = validateRecordingFile(file);
+      if (validationError !== null || !file) {
+        setClientError(validationError);
+        return;
+      }
 
-    setClientError(null);
-    const formData = new FormData();
-    formData.append("recording", file);
-    fetcher.submit(formData, {
-      encType: "multipart/form-data",
-      method: "post",
-    });
-  };
-
-  return (
-    <main
-      className="min-h-screen bg-white text-[#151936]"
-      onDragEnter={(event) => {
-        event.preventDefault();
-        setIsDraggingRecording(true);
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setClientError(null);
+      const formData = new FormData();
+      formData.append("recording", file);
+      fetcher.submit(formData, {
+        encType: "multipart/form-data",
+        method: "post",
+      });
+    },
+    [fetcher, isUploading],
+  );
+  const shellChrome = useMemo<AppShellChrome>(
+    () => ({
+      dropZone: {
+        onDragEnter: (event) => {
+          event.preventDefault();
+          setIsDraggingRecording(true);
+        },
+        onDragLeave: (event) => {
+          if (
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
+            setIsDraggingRecording(false);
+          }
+        },
+        onDragOver: (event) => {
+          event.preventDefault();
+        },
+        onDrop: (event) => {
+          event.preventDefault();
           setIsDraggingRecording(false);
-        }
-      }}
-      onDragOver={(event) => {
-        event.preventDefault();
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        setIsDraggingRecording(false);
 
-        if (event.dataTransfer.files.length !== 1) {
-          setClientError("Upload one recording file at a time.");
-          return;
-        }
+          if (event.dataTransfer.files.length !== 1) {
+            setClientError("Upload one recording file at a time.");
+            return;
+          }
 
-        submitRecording(event.dataTransfer.files.item(0));
-      }}
-    >
-      <div className="flex min-h-screen">
-        <Sidebar
-          completedMeetingsCount={completedMeetingsCount}
-          isUploading={isUploading}
-          meetingsCount={meetings.length}
-          onNewMeeting={() => fileInputRef.current?.click()}
-        />
-        <section className="flex min-w-0 flex-1 flex-col px-4 py-5 sm:px-6 md:px-8 lg:px-10 lg:py-11">
-          <input
-            accept={acceptedRecordingTypes}
-            className="sr-only"
-            disabled={isUploading}
-            onChange={(event) => {
-              submitRecording(event.currentTarget.files?.item(0));
-              event.currentTarget.value = "";
-            }}
-            ref={fileInputRef}
-            type="file"
-          />
-          <MobileHeader
-            isUploading={isUploading}
-            onNewMeeting={() => fileInputRef.current?.click()}
-          />
-          <header className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h1 className="text-3xl font-semibold tracking-normal text-[#10142f] sm:text-4xl">
-                Meetings
-              </h1>
-              <p className="mt-3 text-sm leading-6 text-[#697391] sm:text-base">
-                Upload, review, and manage meeting transcripts
-              </p>
-            </div>
-            <button
-              className="hidden h-12 items-center justify-center gap-2 rounded-lg bg-[#5947f5] px-6 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(89,71,245,0.22)] transition hover:bg-[#4938dc] disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
-              disabled={isUploading}
-              onClick={() => fileInputRef.current?.click()}
-              type="button"
-            >
-              <Icon name="plus" className="size-5" />
-              {isUploading ? "Uploading..." : "New Meeting"}
-            </button>
-          </header>
-
-          {uploadError ? (
-            <p className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {uploadError}
-            </p>
-          ) : null}
-
-          <UploadPanel
-            isDraggingRecording={isDraggingRecording}
-            isUploading={isUploading}
-            onBrowseFiles={() => fileInputRef.current?.click()}
-          />
-          <MeetingsToolbar
-            dateFilter={dateFilter}
-            searchTerm={searchTerm}
-            statusFilter={statusFilter}
-            onDateFilterChange={setDateFilter}
-            onSearchTermChange={setSearchTerm}
-            onStatusFilterChange={setStatusFilter}
-          />
-
-          {meetings.length === 0 ? (
-            <EmptyMeetings isUploading={isUploading} />
-          ) : (
-            <MeetingList
-              meetings={filteredMeetings}
-              totalMeetings={meetings.length}
-            />
-          )}
-        </section>
-      </div>
-    </main>
+          submitRecording(event.dataTransfer.files.item(0));
+        },
+      },
+      primaryAction: {
+        kind: "button" as const,
+        label: isUploading ? "Uploading..." : "New Meeting",
+        ariaLabel: isUploading ? "Uploading meeting" : "New Meeting",
+        disabled: isUploading,
+        onClick: openFilePicker,
+      },
+      storage: {
+        description: `${completedMeetingsCount} processed / ${meetings.length} meetings`,
+        percentage: 28,
+        percentageLabel: "28%",
+      },
+    }),
+    [
+      completedMeetingsCount,
+      isUploading,
+      meetings.length,
+      openFilePicker,
+      submitRecording,
+    ],
   );
-}
 
-function Sidebar({
-  completedMeetingsCount,
-  isUploading,
-  meetingsCount,
-  onNewMeeting,
-}: {
-  completedMeetingsCount: number;
-  isUploading: boolean;
-  meetingsCount: number;
-  onNewMeeting: () => void;
-}) {
+  useAppShellChrome(shellChrome);
+
   return (
-    <aside className="hidden w-[258px] shrink-0 border-r border-[#edf0f7] bg-white px-6 py-8 lg:flex lg:flex-col">
-      <Link className="flex items-center gap-3 text-lg font-semibold" to="/">
-        <LogoMark />
-        <span>MeetNotes</span>
-      </Link>
-      <button
-        className="mt-10 inline-flex h-12 items-center justify-center gap-3 rounded-lg bg-[#5947f5] text-sm font-semibold text-white shadow-[0_14px_30px_rgba(89,71,245,0.22)] transition hover:bg-[#4938dc] disabled:cursor-not-allowed disabled:opacity-60"
+    <section className="flex min-w-0 flex-1 flex-col px-4 py-5 sm:px-6 md:px-8 lg:px-10 lg:py-11">
+      <input
+        accept={acceptedRecordingTypes}
+        className="sr-only"
         disabled={isUploading}
-        onClick={onNewMeeting}
-        type="button"
-      >
-        <Icon name="plus" className="size-5" />
-        {isUploading ? "Uploading..." : "New Meeting"}
-      </button>
-      <nav className="mt-9 space-y-2 text-sm font-medium text-[#151936]">
-        <Link
-          className="flex items-center gap-3 rounded-lg bg-[#f2f0ff] px-3 py-3 text-[#5947f5]"
-          to="/"
-        >
-          <Icon name="home" className="size-5" />
-          Home
-        </Link>
-        <a
-          className="flex items-center gap-3 rounded-lg px-3 py-3"
-          href="#meetings-list"
-        >
-          <Icon name="calendar" className="size-5 text-[#66718c]" />
-          Meetings
-        </a>
-        <a
-          className="flex items-center gap-3 rounded-lg px-3 py-3"
-          href="#meetings-search"
-        >
-          <Icon name="search" className="size-5 text-[#66718c]" />
-          Search
-        </a>
-        <div className="flex items-center gap-3 rounded-lg px-3 py-3 text-[#66718c]">
-          <Icon name="users" className="size-5" />
-          Speakers
-        </div>
-        <div className="flex items-center gap-3 rounded-lg px-3 py-3 text-[#66718c]">
-          <Icon name="file" className="size-5" />
-          Templates
-        </div>
-        <div className="flex items-center gap-3 rounded-lg px-3 py-3 text-[#66718c]">
-          <Icon name="settings" className="size-5" />
-          Settings
-        </div>
-      </nav>
-      <div className="mt-auto">
-        <div className="rounded-lg border border-[#edf0f7] p-4 shadow-[0_10px_25px_rgba(17,24,39,0.03)]">
-          <div className="flex items-center justify-between text-sm font-medium">
-            <span>Storage</span>
-            <span className="text-xs text-[#697391]">28%</span>
-          </div>
-          <p className="mt-2 text-xs text-[#697391]">
-            {completedMeetingsCount} processed / {meetingsCount} meetings
+        onChange={(event) => {
+          submitRecording(event.currentTarget.files?.item(0));
+          event.currentTarget.value = "";
+        }}
+        ref={fileInputRef}
+        type="file"
+      />
+      <header className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-normal text-[#10142f] sm:text-4xl">
+            Meetings
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-[#697391] sm:text-base">
+            Upload, review, and manage meeting transcripts
           </p>
-          <div className="mt-4 h-1.5 rounded-full bg-[#edf0f7]">
-            <div className="h-full w-[28%] rounded-full bg-[#5947f5]" />
-          </div>
         </div>
-        <div className="mt-7 border-t border-[#edf0f7] pt-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-full bg-[#edf0f7] text-sm font-semibold text-[#151936]">
-              AA
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">Atila</p>
-              <p className="text-xs text-[#697391]">Admin</p>
-            </div>
-            <Icon
-              name="chevron-down"
-              className="ml-auto size-4 text-[#66718c]"
-            />
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+        <button
+          className="hidden h-12 items-center justify-center gap-2 rounded-lg bg-[#5947f5] px-6 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(89,71,245,0.22)] transition hover:bg-[#4938dc] disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
+          disabled={isUploading}
+          onClick={openFilePicker}
+          type="button"
+        >
+          <Icon name="plus" className="size-5" />
+          {isUploading ? "Uploading..." : "New Meeting"}
+        </button>
+      </header>
 
-function MobileHeader({
-  isUploading,
-  onNewMeeting,
-}: {
-  isUploading: boolean;
-  onNewMeeting: () => void;
-}) {
-  return (
-    <div className="mb-7 flex items-center justify-between gap-3 lg:hidden">
-      <Link className="flex min-w-0 items-center gap-3 font-semibold" to="/">
-        <LogoMark />
-        <span className="truncate">MeetNotes</span>
-      </Link>
-      <button
-        aria-label={isUploading ? "Uploading meeting" : "New Meeting"}
-        className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#5947f5] text-white shadow-[0_12px_24px_rgba(89,71,245,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isUploading}
-        onClick={onNewMeeting}
-        type="button"
-      >
-        <Icon name="plus" className="size-5" />
-      </button>
-    </div>
+      {uploadError ? (
+        <p className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {uploadError}
+        </p>
+      ) : null}
+
+      <UploadPanel
+        isDraggingRecording={isDraggingRecording}
+        isUploading={isUploading}
+        onBrowseFiles={openFilePicker}
+      />
+      <MeetingsToolbar
+        dateFilter={dateFilter}
+        searchTerm={searchTerm}
+        statusFilter={statusFilter}
+        onDateFilterChange={setDateFilter}
+        onSearchTermChange={setSearchTerm}
+        onStatusFilterChange={setStatusFilter}
+      />
+
+      {meetings.length === 0 ? (
+        <EmptyMeetings isUploading={isUploading} />
+      ) : (
+        <MeetingList
+          meetings={filteredMeetings}
+          totalMeetings={meetings.length}
+        />
+      )}
+    </section>
   );
 }
 
@@ -741,219 +642,6 @@ function StatusBadge({
       {presentation.label}
     </span>
   );
-}
-
-function LogoMark() {
-  return (
-    <span className="flex size-8 items-center justify-center text-[#5947f5]">
-      <svg aria-hidden="true" fill="none" viewBox="0 0 32 32">
-        <path
-          d="M7 13v6M12 8v16M17 5v22M22 10v12M27 14v4"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeWidth="3.5"
-        />
-      </svg>
-    </span>
-  );
-}
-
-type IconName =
-  | "alert"
-  | "calendar"
-  | "chart"
-  | "check"
-  | "chevron-down"
-  | "chevron-left"
-  | "chevron-right"
-  | "clock"
-  | "file"
-  | "folder"
-  | "home"
-  | "megaphone"
-  | "plus"
-  | "refresh"
-  | "search"
-  | "settings"
-  | "sliders"
-  | "upload"
-  | "upload-cloud"
-  | "users";
-
-function Icon({ className, name }: { className?: string; name: IconName }) {
-  const common = {
-    className,
-    fill: "none",
-    stroke: "currentColor",
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    strokeWidth: 2,
-    viewBox: "0 0 24 24",
-    "aria-hidden": true,
-  };
-
-  switch (name) {
-    case "alert":
-      return (
-        <svg {...common}>
-          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
-          <path d="M12 9v4" />
-          <path d="M12 17h.01" />
-        </svg>
-      );
-    case "calendar":
-      return (
-        <svg {...common}>
-          <path d="M8 2v4" />
-          <path d="M16 2v4" />
-          <rect height="18" rx="2" width="18" x="3" y="4" />
-          <path d="M3 10h18" />
-        </svg>
-      );
-    case "chart":
-      return (
-        <svg {...common}>
-          <path d="M5 20V10" />
-          <path d="M12 20V4" />
-          <path d="M19 20v-7" />
-        </svg>
-      );
-    case "check":
-      return (
-        <svg {...common}>
-          <path d="m5 12 4 4L19 6" />
-        </svg>
-      );
-    case "chevron-down":
-      return (
-        <svg {...common}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      );
-    case "chevron-left":
-      return (
-        <svg {...common}>
-          <path d="m15 18-6-6 6-6" />
-        </svg>
-      );
-    case "chevron-right":
-      return (
-        <svg {...common}>
-          <path d="m9 18 6-6-6-6" />
-        </svg>
-      );
-    case "clock":
-      return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
-      );
-    case "file":
-      return (
-        <svg {...common}>
-          <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7Z" />
-          <path d="M14 2v5h5" />
-          <path d="M9 13h6" />
-          <path d="M9 17h4" />
-        </svg>
-      );
-    case "folder":
-      return (
-        <svg {...common}>
-          <path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-        </svg>
-      );
-    case "home":
-      return (
-        <svg {...common}>
-          <path d="m3 11 9-8 9 8" />
-          <path d="M5 10v10h14V10" />
-          <path d="M9 20v-6h6v6" />
-        </svg>
-      );
-    case "megaphone":
-      return (
-        <svg {...common}>
-          <path d="m3 11 14-6v14L3 13Z" />
-          <path d="M7 14v5a2 2 0 0 0 2 2h1" />
-          <path d="M21 9v6" />
-        </svg>
-      );
-    case "plus":
-      return (
-        <svg {...common}>
-          <path d="M12 5v14" />
-          <path d="M5 12h14" />
-        </svg>
-      );
-    case "refresh":
-      return (
-        <svg {...common}>
-          <path d="M21 12a9 9 0 0 1-9 9 8.7 8.7 0 0 1-6.3-2.7" />
-          <path d="M3 12a9 9 0 0 1 15.3-6.3" />
-          <path d="M3 18v-6h6" />
-          <path d="M21 6v6h-6" />
-        </svg>
-      );
-    case "search":
-      return (
-        <svg {...common}>
-          <circle cx="11" cy="11" r="8" />
-          <path d="m21 21-4.3-4.3" />
-        </svg>
-      );
-    case "settings":
-      return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V22a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 18l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 8A2 2 0 1 1 7.1 5.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V4a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.8 8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 1 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" />
-        </svg>
-      );
-    case "sliders":
-      return (
-        <svg {...common}>
-          <path d="M4 6h10" />
-          <path d="M18 6h2" />
-          <path d="M4 12h3" />
-          <path d="M11 12h9" />
-          <path d="M4 18h10" />
-          <path d="M18 18h2" />
-          <circle cx="16" cy="6" r="2" />
-          <circle cx="9" cy="12" r="2" />
-          <circle cx="16" cy="18" r="2" />
-        </svg>
-      );
-    case "upload":
-      return (
-        <svg {...common}>
-          <path d="M12 3v12" />
-          <path d="m7 8 5-5 5 5" />
-          <path d="M5 21h14" />
-        </svg>
-      );
-    case "upload-cloud":
-      return (
-        <svg {...common}>
-          <path d="M16 16l-4-4-4 4" />
-          <path d="M12 12v9" />
-          <path d="M20.4 18.5A5 5 0 0 0 18 9h-1.3A8 8 0 1 0 4 16.3" />
-        </svg>
-      );
-    case "users":
-      return (
-        <svg {...common}>
-          <path d="M16 21v-2a4 4 0 0 0-8 0v2" />
-          <circle cx="12" cy="7" r="4" />
-          <path d="M22 21v-2a4 4 0 0 0-3-3.9" />
-          <path d="M16 3.1a4 4 0 0 1 0 7.8" />
-        </svg>
-      );
-    default: {
-      const exhaustiveName: never = name;
-      return exhaustiveName;
-    }
-  }
 }
 
 function RelativeUploadDate({ createdAt }: { createdAt: string }) {

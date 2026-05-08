@@ -130,300 +130,226 @@ export default function MeetingDetailPage({
   };
 
   return (
-    <main className="min-h-screen bg-white text-slate-950">
-      <div className="flex min-h-screen">
-        <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white px-5 py-7 lg:flex lg:flex-col">
-          <Link className="flex items-center gap-3" to="/">
-            <span className="flex size-8 items-center justify-center rounded-xl bg-indigo-600 text-sm font-semibold text-white">
-              S
-            </span>
-            <span className="text-lg font-semibold tracking-tight">Slusko</span>
-          </Link>
-          <Link
-            className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-200 transition hover:bg-indigo-500"
-            to="/"
-          >
-            <span className="text-xl leading-none">+</span>
-            New Meeting
-          </Link>
-          <nav className="mt-8 space-y-2 text-sm font-medium text-slate-700">
-            <SidebarLink label="Home" to="/" />
-            <SidebarLink active label="Meetings" to="/" />
-            <SidebarLink label="Search" to="/" />
-            <SidebarLink label="Speakers" to="/" />
-            <SidebarLink label="Templates" to="/" />
-            <SidebarLink label="Settings" to="/" />
-          </nav>
-          <div className="mt-auto rounded-lg border border-slate-200 p-4">
-            <p className="text-sm font-semibold">Storage</p>
-            <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-              <span>28.4 GB / 100 GB used</span>
-              <span>28%</span>
-            </div>
-            <div className="mt-3 h-1.5 rounded-full bg-slate-200">
-              <div className="h-1.5 w-[28%] rounded-full bg-indigo-600" />
-            </div>
-          </div>
-        </aside>
-
-        <section className="min-w-0 flex-1">
-          <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mb-6 flex items-center justify-between gap-4 lg:hidden">
-              <Link className="flex items-center gap-3" to="/">
-                <span className="flex size-8 items-center justify-center rounded-xl bg-indigo-600 text-sm font-semibold text-white">
-                  S
-                </span>
-                <span className="text-lg font-semibold tracking-tight">
-                  Slusko
-                </span>
-              </Link>
+    <section className="min-w-0 flex-1 text-slate-950">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+        <header className="border-b border-slate-200 pb-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
               <Link
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700"
+                className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-indigo-600"
                 to="/"
               >
-                Meetings
+                <span aria-hidden="true">‹</span>
+                Back to Meetings
               </Link>
-            </div>
 
-            <header className="border-b border-slate-200 pb-6">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                <div className="min-w-0">
-                  <Link
-                    className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-indigo-600"
-                    to="/"
-                  >
-                    <span aria-hidden="true">‹</span>
-                    Back to Meetings
-                  </Link>
-
-                  <div className="mt-6 min-w-0">
-                    {isEditingTitle ? (
-                      <Form
-                        className="space-y-3"
-                        method="post"
-                        preventScrollReset
-                      >
-                        <input
-                          name="_intent"
-                          type="hidden"
-                          value="update-title"
-                        />
-                        <label className="sr-only" htmlFor="meeting-title">
-                          Meeting title
-                        </label>
-                        <div className="flex flex-col gap-3 md:flex-row">
-                          <input
-                            aria-describedby={titleFeedbackId}
-                            aria-invalid={
-                              titleFeedback?.ok === false && isEditingTitle
-                                ? true
-                                : undefined
-                            }
-                            className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-4 py-3 text-2xl font-semibold tracking-tight text-slate-950 transition outline-none placeholder:text-slate-400 focus:border-indigo-500 sm:text-3xl"
-                            disabled={isDeleting || isUpdatingTitle}
-                            id="meeting-title"
-                            maxLength={200}
-                            name="title"
-                            onChange={(event) =>
-                              setTitleDraft(event.target.value)
-                            }
-                            required
-                            value={titleDraft}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              className="inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-                              disabled={isDeleting || isUpdatingTitle}
-                              type="submit"
-                            >
-                              {isUpdatingTitle ? "Saving…" : "Save"}
-                            </button>
-                            <button
-                              className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                              disabled={isUpdatingTitle}
-                              onClick={cancelTitleEdit}
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                        <TitleFeedback
-                          actionData={
-                            isEditingTitle ? titleFeedback : undefined
-                          }
-                          feedbackId={titleFeedbackId}
-                        />
-                      </Form>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <h1 className="min-w-0 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-                            {meeting.title}
-                          </h1>
-                          <button
-                            aria-label="Edit meeting title"
-                            className="mt-1 inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-slate-50 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
-                            disabled={isDeleting || isUpdatingTitle}
-                            onClick={beginTitleEdit}
-                            type="button"
-                          >
-                            ✎
-                          </button>
-                        </div>
-                        <TitleFeedback
-                          actionData={
-                            !isEditingTitle ? titleFeedback : undefined
-                          }
-                          feedbackId={titleFeedbackId}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
-                    <InlineMeta label="Uploaded" value={uploadedLabel} />
-                    <InlineMeta label="Duration" value={formattedDuration} />
-                    <InlineMeta
-                      label="Speakers"
-                      value={`${speakerStats.length || 1} speaker${
-                        speakerStats.length === 1 ? "" : "s"
-                      }`}
-                    />
-                    <div className="flex items-center gap-2">
-                      <dt className="sr-only">Status</dt>
-                      <dd>
-                        <StatusBadge
-                          progress={meeting.transcriptionProgress}
-                          status={meeting.status}
-                        />
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50">
-                    <span aria-hidden="true">↗</span>
-                    Share
-                  </button>
-                  <button
-                    aria-label="More meeting actions"
-                    className="inline-flex size-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg leading-none text-slate-700 shadow-sm transition hover:bg-slate-50"
-                  >
-                    …
-                  </button>
-                  <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-200 transition hover:bg-indigo-500">
-                    <span aria-hidden="true">↓</span>
-                    Export
-                  </button>
-                </div>
-              </div>
-            </header>
-
-            <div className="mt-5 overflow-x-auto border-b border-slate-200">
-              <nav className="flex min-w-max gap-8 text-sm font-medium text-slate-600">
-                {[
-                  "Overview",
-                  "Transcript",
-                  "Timeline",
-                  "Speakers",
-                  "Highlights",
-                  "Notes",
-                  "AI Chat",
-                ].map((tab, index) => (
-                  <a
-                    className={`border-b-2 px-1 pb-4 transition ${
-                      index === 0
-                        ? "border-indigo-600 text-indigo-600"
-                        : "border-transparent hover:border-slate-300 hover:text-slate-950"
-                    }`}
-                    href={`#${tab.toLowerCase().replaceAll(" ", "-")}`}
-                    key={tab}
-                  >
-                    {tab}
-                  </a>
-                ))}
-              </nav>
-            </div>
-
-            <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-              <div className="min-w-0 space-y-4">
-                <SummaryPanel summary={summary} status={meeting.status} />
-                <AudioScrubber duration={formattedDuration} />
-                <TranscriptPanel
-                  segments={transcriptSegments}
-                  status={meeting.status}
-                />
-
-                {meeting.status === "error" ? (
-                  <ErrorBlock meeting={meeting} />
-                ) : null}
-
-                <section className="rounded-lg border border-orange-200 bg-orange-50 p-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold text-orange-950">
-                        Delete meeting
-                      </h2>
-                      <p className="mt-1 text-sm text-orange-800">
-                        Removes this meeting record and its stored audio
-                        artifacts.
-                      </p>
-                      {actionData?.ok === false &&
-                      actionData.intent === "delete-meeting" ? (
-                        <p className="mt-3 text-sm font-medium text-orange-800">
-                          {actionData.error}
-                        </p>
-                      ) : null}
-                    </div>
-                    <Form
-                      method="post"
-                      onSubmit={(event) => {
-                        if (
-                          !window.confirm(
-                            "Delete this meeting and its stored audio artifacts? This cannot be undone.",
-                          )
-                        ) {
-                          event.preventDefault();
-                        }
-                      }}
-                    >
+              <div className="mt-6 min-w-0">
+                {isEditingTitle ? (
+                  <Form className="space-y-3" method="post" preventScrollReset>
+                    <input name="_intent" type="hidden" value="update-title" />
+                    <label className="sr-only" htmlFor="meeting-title">
+                      Meeting title
+                    </label>
+                    <div className="flex flex-col gap-3 md:flex-row">
                       <input
-                        name="_intent"
-                        type="hidden"
-                        value="delete-meeting"
-                      />
-                      <button
-                        className="inline-flex h-10 items-center justify-center rounded-lg border border-orange-300 px-4 text-sm font-semibold text-orange-950 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-describedby={titleFeedbackId}
+                        aria-invalid={
+                          titleFeedback?.ok === false && isEditingTitle
+                            ? true
+                            : undefined
+                        }
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-4 py-3 text-2xl font-semibold tracking-tight text-slate-950 transition outline-none placeholder:text-slate-400 focus:border-indigo-500 sm:text-3xl"
                         disabled={isDeleting || isUpdatingTitle}
-                        type="submit"
+                        id="meeting-title"
+                        maxLength={200}
+                        name="title"
+                        onChange={(event) => setTitleDraft(event.target.value)}
+                        required
+                        value={titleDraft}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          className="inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={isDeleting || isUpdatingTitle}
+                          type="submit"
+                        >
+                          {isUpdatingTitle ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={isUpdatingTitle}
+                          onClick={cancelTitleEdit}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                    <TitleFeedback
+                      actionData={isEditingTitle ? titleFeedback : undefined}
+                      feedbackId={titleFeedbackId}
+                    />
+                  </Form>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <h1 className="min-w-0 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                        {meeting.title}
+                      </h1>
+                      <button
+                        aria-label="Edit meeting title"
+                        className="mt-1 inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-slate-50 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isDeleting || isUpdatingTitle}
+                        onClick={beginTitleEdit}
+                        type="button"
                       >
-                        {isDeleting ? "Deleting…" : "Delete meeting"}
+                        ✎
                       </button>
-                    </Form>
+                    </div>
+                    <TitleFeedback
+                      actionData={!isEditingTitle ? titleFeedback : undefined}
+                      feedbackId={titleFeedbackId}
+                    />
                   </div>
-                </section>
+                )}
               </div>
 
-              <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-                <SpeakersPanel
-                  durationSeconds={meeting.durationSeconds}
-                  speakers={speakerStats}
+              <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
+                <InlineMeta label="Uploaded" value={uploadedLabel} />
+                <InlineMeta label="Duration" value={formattedDuration} />
+                <InlineMeta
+                  label="Speakers"
+                  value={`${speakerStats.length || 1} speaker${
+                    speakerStats.length === 1 ? "" : "s"
+                  }`}
                 />
-                <HighlightsPanel topics={keyTopics} />
-                <NotesPanel summary={summary} uploadedLabel={uploadedLabel} />
-                <PipelinePanel
-                  duration={formattedDuration}
-                  presentationLabel={presentation.label}
-                  uploadedLabel={formatUploadedAt(meeting.createdAt)}
-                />
-              </aside>
+                <div className="flex items-center gap-2">
+                  <dt className="sr-only">Status</dt>
+                  <dd>
+                    <StatusBadge
+                      progress={meeting.transcriptionProgress}
+                      status={meeting.status}
+                    />
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50">
+                <span aria-hidden="true">↗</span>
+                Share
+              </button>
+              <button
+                aria-label="More meeting actions"
+                className="inline-flex size-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg leading-none text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                …
+              </button>
+              <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-200 transition hover:bg-indigo-500">
+                <span aria-hidden="true">↓</span>
+                Export
+              </button>
             </div>
           </div>
-        </section>
+        </header>
+
+        <div className="mt-5 overflow-x-auto border-b border-slate-200">
+          <nav className="flex min-w-max gap-8 text-sm font-medium text-slate-600">
+            {[
+              "Overview",
+              "Transcript",
+              "Timeline",
+              "Speakers",
+              "Highlights",
+              "Notes",
+              "AI Chat",
+            ].map((tab, index) => (
+              <a
+                className={`border-b-2 px-1 pb-4 transition ${
+                  index === 0
+                    ? "border-indigo-600 text-indigo-600"
+                    : "border-transparent hover:border-slate-300 hover:text-slate-950"
+                }`}
+                href={`#${tab.toLowerCase().replaceAll(" ", "-")}`}
+                key={tab}
+              >
+                {tab}
+              </a>
+            ))}
+          </nav>
+        </div>
+
+        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 space-y-4">
+            <SummaryPanel summary={summary} status={meeting.status} />
+            <AudioScrubber duration={formattedDuration} />
+            <TranscriptPanel
+              segments={transcriptSegments}
+              status={meeting.status}
+            />
+
+            {meeting.status === "error" ? (
+              <ErrorBlock meeting={meeting} />
+            ) : null}
+
+            <section className="rounded-lg border border-orange-200 bg-orange-50 p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-orange-950">
+                    Delete meeting
+                  </h2>
+                  <p className="mt-1 text-sm text-orange-800">
+                    Removes this meeting record and its stored audio artifacts.
+                  </p>
+                  {actionData?.ok === false &&
+                  actionData.intent === "delete-meeting" ? (
+                    <p className="mt-3 text-sm font-medium text-orange-800">
+                      {actionData.error}
+                    </p>
+                  ) : null}
+                </div>
+                <Form
+                  method="post"
+                  onSubmit={(event) => {
+                    if (
+                      !window.confirm(
+                        "Delete this meeting and its stored audio artifacts? This cannot be undone.",
+                      )
+                    ) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  <input name="_intent" type="hidden" value="delete-meeting" />
+                  <button
+                    className="inline-flex h-10 items-center justify-center rounded-lg border border-orange-300 px-4 text-sm font-semibold text-orange-950 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isDeleting || isUpdatingTitle}
+                    type="submit"
+                  >
+                    {isDeleting ? "Deleting…" : "Delete meeting"}
+                  </button>
+                </Form>
+              </div>
+            </section>
+          </div>
+
+          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+            <SpeakersPanel
+              durationSeconds={meeting.durationSeconds}
+              speakers={speakerStats}
+            />
+            <HighlightsPanel topics={keyTopics} />
+            <NotesPanel summary={summary} uploadedLabel={uploadedLabel} />
+            <PipelinePanel
+              duration={formattedDuration}
+              presentationLabel={presentation.label}
+              uploadedLabel={formatUploadedAt(meeting.createdAt)}
+            />
+          </aside>
+        </div>
       </div>
-    </main>
+    </section>
   );
 }
 
@@ -450,35 +376,6 @@ function TitleFeedback({
     <p className="text-sm font-medium text-emerald-700" id={feedbackId}>
       Title saved as “{actionData.title}”.
     </p>
-  );
-}
-
-function SidebarLink({
-  active = false,
-  label,
-  to,
-}: {
-  active?: boolean;
-  label: string;
-  to: string;
-}) {
-  return (
-    <Link
-      className={`flex items-center gap-3 rounded-lg px-3 py-3 transition ${
-        active
-          ? "bg-indigo-50 text-indigo-700"
-          : "text-slate-700 hover:bg-slate-50 hover:text-slate-950"
-      }`}
-      to={to}
-    >
-      <span
-        aria-hidden="true"
-        className={`size-2 rounded-full ${
-          active ? "bg-indigo-600" : "bg-slate-300"
-        }`}
-      />
-      {label}
-    </Link>
   );
 }
 
