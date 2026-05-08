@@ -93,6 +93,11 @@ describe("meeting list status helpers", () => {
     expect(formatDuration(3_905)).toBe("1h 5m");
   });
 
+  test("rounds fractional durations up to whole seconds", () => {
+    expect(formatDuration(55.85999999999999)).toBe("56s");
+    expect(formatDuration(193.02000000000004)).toBe("3m 14s");
+  });
+
   test("formats transcript timestamps for sub-hour and hour values", () => {
     expect(formatTranscriptTimestamp(0)).toBe("0:00");
     expect(formatTranscriptTimestamp(75.9)).toBe("1:15");

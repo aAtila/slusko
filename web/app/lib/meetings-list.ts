@@ -61,9 +61,11 @@ export function shouldPollMeetings(meetings: HomeMeetingListItem[]) {
 }
 
 export function formatDuration(seconds: number) {
-  const hours = Math.floor(seconds / 3_600);
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  const remainingSeconds = seconds % 60;
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  const roundedSeconds = Math.ceil(safeSeconds);
+  const hours = Math.floor(roundedSeconds / 3_600);
+  const minutes = Math.floor((roundedSeconds % 3_600) / 60);
+  const remainingSeconds = roundedSeconds % 60;
 
   if (hours > 0) {
     return `${hours}h ${minutes}m`;
