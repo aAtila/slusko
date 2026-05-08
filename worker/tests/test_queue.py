@@ -21,6 +21,14 @@ from slusko_worker.db.models import (
 )
 from slusko_worker.db.queue import (
     CLAIM_NEXT_MEETING_SQL,
+    MARK_DIARIZATION_STARTED_SQL,
+    MARK_DIARIZATION_SUCCEEDED_SQL,
+    MARK_FAILURE_SQL,
+    MARK_NORMALIZATION_STARTED_SQL,
+    MARK_SUMMARIZATION_STARTED_SQL,
+    MARK_SUMMARIZATION_SUCCEEDED_SQL,
+    MARK_TRANSCRIPTION_STARTED_SQL,
+    MARK_TRANSCRIPTION_SUCCEEDED_SQL,
     NON_TERMINAL_STATUSES,
     PostgresMeetingQueue,
 )
@@ -154,7 +162,58 @@ def test_claim_query_transitions_pending_claims_before_returning() -> None:
     assert "for update skip locked" in sql
     assert "update meetings" in sql
     assert "returning meeting.id" in sql
-    assert "candidate.claimed_status as status" in sql
+    assert "when candidate.claimed_status = 'pending' then 'normalizing'::meeting_status" in sql
+    assert "else candidate.claimed_status end as status" in sql
+
+
+def test_claim_query_promotes_pending_retry_to_resume_stage() -> None:
+    sql = normalize_sql(CLAIM_NEXT_MEETING_SQL)
+
+    assert "candidate.claimed_status = 'pending' and candidate.resume_from_stage in" in sql
+    for status in (
+        MeetingStatus.NORMALIZING,
+        MeetingStatus.TRANSCRIBING,
+        MeetingStatus.DIARIZING,
+        MeetingStatus.SUMMARIZING,
+    ):
+        assert f"'{status.value}'" in sql
+    assert "then candidate.resume_from_stage" in sql
+    assert "resume_from_stage = null" in sql
+    assert "as status" in sql
+
+
+def test_claim_next_returns_effective_retry_stage_to_processor() -> None:
+    row = {
+        "id": UUID("00000000-0000-0000-0000-000000000001"),
+        "status": "diarizing",
+        "resume_from_stage": None,
+        "transcription_progress": None,
+        "error_kind": None,
+        "error_message": None,
+        "failed_at_stage": None,
+    }
+    connection = RecordingConnection(row)
+    queue = PostgresMeetingQueue(lambda: connection)
+
+    meeting = queue.claim_next()
+
+    assert meeting is not None
+    assert meeting.status == MeetingStatus.DIARIZING
+    assert meeting.resume_from_stage is None
+
+
+def test_stage_status_writes_clear_stale_resume_stage() -> None:
+    for sql in (
+        MARK_NORMALIZATION_STARTED_SQL,
+        MARK_TRANSCRIPTION_STARTED_SQL,
+        MARK_TRANSCRIPTION_SUCCEEDED_SQL,
+        MARK_DIARIZATION_STARTED_SQL,
+        MARK_DIARIZATION_SUCCEEDED_SQL,
+        MARK_SUMMARIZATION_STARTED_SQL,
+        MARK_SUMMARIZATION_SUCCEEDED_SQL,
+        MARK_FAILURE_SQL,
+    ):
+        assert "resume_from_stage = null" in normalize_sql(sql)
 
 
 def test_mark_normalization_started_clears_progress_and_error_fields() -> None:
@@ -1040,6 +1099,115 @@ def test_real_postgres_claim_next_does_not_duplicate_pending_claim_before_proces
                 "select status from meetings where id = %s", [row_id]
             ).fetchone()
         assert row == ("normalizing",)
+    finally:
+        with psycopg.connect(database_url, autocommit=True) as admin:
+            admin.execute(f'drop schema if exists "{schema_name}" cascade')
+
+
+def test_real_postgres_claim_next_promotes_pending_retry_to_resume_stage() -> None:
+    database_url = os.getenv("WORKER_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip(
+            "set WORKER_TEST_DATABASE_URL to run the real retry claim_next check"
+        )
+
+    schema_name = f"worker_retry_claim_test_{uuid4().hex}"
+    row_id = uuid4()
+
+    with psycopg.connect(database_url, autocommit=True) as admin:
+        admin.execute(f'create schema "{schema_name}"')
+        admin.execute(f'set search_path to "{schema_name}"')
+        admin.execute(
+            """
+            create type meeting_status as enum (
+              'pending',
+              'normalizing',
+              'transcribing',
+              'diarizing',
+              'summarizing',
+              'done',
+              'error'
+            )
+            """
+        )
+        admin.execute(
+            """
+            create table meetings (
+              id uuid primary key,
+              status meeting_status not null,
+              resume_from_stage meeting_status,
+              transcription_progress integer,
+              error_kind text,
+              error_message text,
+              failed_at_stage meeting_status,
+              created_at timestamptz not null,
+              updated_at timestamptz not null default now()
+            )
+            """
+        )
+        admin.execute(
+            """
+            insert into meetings (
+              id,
+              status,
+              resume_from_stage,
+              transcription_progress,
+              error_kind,
+              error_message,
+              failed_at_stage,
+              created_at
+            ) values (
+              %s,
+              'pending',
+              'diarizing',
+              75,
+              'diarization_failed',
+              'stale failure',
+              'diarizing',
+              now()
+            )
+            """,
+            [row_id],
+        )
+
+    def connection_factory() -> psycopg.Connection[object]:
+        connection = psycopg.connect(database_url)
+        connection.execute(f'set search_path to "{schema_name}"')
+        connection.commit()
+        return connection
+
+    try:
+        queue = PostgresMeetingQueue(connection_factory)
+
+        claim = queue.claim_next()
+        duplicate_claim = queue.claim_next()
+
+        assert claim is not None
+        assert claim.id == row_id
+        assert claim.status == MeetingStatus.DIARIZING
+        assert claim.resume_from_stage is None
+        assert claim.transcription_progress is None
+        assert claim.error_kind is None
+        assert claim.error_message is None
+        assert claim.failed_at_stage is None
+        assert duplicate_claim is None
+
+        with connection_factory() as connection:
+            row = connection.execute(
+                """
+                select
+                  status,
+                  resume_from_stage,
+                  transcription_progress,
+                  error_kind,
+                  error_message,
+                  failed_at_stage
+                from meetings
+                where id = %s
+                """,
+                [row_id],
+            ).fetchone()
+        assert row == ("diarizing", None, None, None, None, None)
     finally:
         with psycopg.connect(database_url, autocommit=True) as admin:
             admin.execute(f'drop schema if exists "{schema_name}" cascade')

@@ -8,6 +8,86 @@ import { MeetingMutationError } from "./meetings-mutations.server";
 const meetingId = "00000000-0000-4000-8000-000000000006";
 
 describe("meeting detail route action", () => {
+  test("queues a retry through the retry mutation", async () => {
+    const formData = new FormData();
+    const calls: Array<{ meetingId: string | undefined }> = [];
+
+    formData.set("_intent", "retry-meeting");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        retryMeeting: async (input) => {
+          calls.push(input);
+          return { id: input.meetingId ?? "", resumeFromStage: "diarizing" };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: true,
+        intent: "retry-meeting",
+        resumeFromStage: "diarizing",
+      },
+    } satisfies MeetingDetailActionResult);
+    expect(calls).toEqual([{ meetingId }]);
+  });
+
+  test("returns retry validation feedback", async () => {
+    const formData = new FormData();
+
+    formData.set("_intent", "retry-meeting");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        retryMeeting: async () => {
+          throw new MeetingMutationError(
+            "This failure cannot be retried.",
+            400,
+          );
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: false,
+        intent: "retry-meeting",
+        error: "This failure cannot be retried.",
+      },
+      status: 400,
+    } satisfies MeetingDetailActionResult);
+  });
+
+  test("returns friendly feedback when retry queueing fails unexpectedly", async () => {
+    const formData = new FormData();
+
+    formData.set("_intent", "retry-meeting");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        retryMeeting: async () => {
+          throw new Error("database unavailable");
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: false,
+        intent: "retry-meeting",
+        error: "Could not queue this retry. Please try again.",
+      },
+      status: 500,
+    } satisfies MeetingDetailActionResult);
+  });
+
   test("saves a speaker mapping through the speaker mapping mutation", async () => {
     const formData = new FormData();
     const calls: Array<{

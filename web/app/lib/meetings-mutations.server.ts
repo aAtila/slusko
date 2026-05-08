@@ -1,7 +1,17 @@
 import { and, eq } from "drizzle-orm";
-import { meetings, speakerMappings, transcriptSegments } from "~/db/schema";
+import {
+  meetings,
+  speakerMappings,
+  transcriptSegments,
+  type ErrorKind,
+  type MeetingStatus,
+} from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
 import { removeMeetingDirectory as removeMeetingStorageDirectory } from "./meeting-storage.server";
+import {
+  getMeetingFailurePresentation,
+  isRetryableFailedStage,
+} from "./meetings-list";
 
 const maxMeetingTitleLength = 200;
 const maxSpeakerNameLength = 100;
@@ -32,6 +42,28 @@ export type SaveSpeakerMappingResult = {
   name: string | null;
 };
 
+export type RetryMeetingResult = {
+  id: string;
+  resumeFromStage: MeetingStatus;
+};
+
+type MeetingFailureRow = {
+  id: string;
+  status: MeetingStatus;
+  errorKind: ErrorKind | null;
+  errorMessage: string | null;
+  failedAtStage: MeetingStatus | null;
+};
+
+type RetryMeetingUpdate = {
+  status: "pending";
+  errorKind: null;
+  errorMessage: null;
+  failedAtStage: null;
+  resumeFromStage: MeetingStatus;
+  transcriptionProgress: null;
+};
+
 type DeleteMeetingOptions = {
   findMeetingById?: (meetingId: string) => Promise<{ id: string } | null>;
   removeMeetingDirectory?: (meetingId: string) => Promise<void>;
@@ -60,6 +92,16 @@ type SaveSpeakerMappingOptions = {
     meetingId: string,
     speakerLabel: string,
   ) => Promise<void>;
+};
+
+type RetryMeetingOptions = {
+  findMeetingFailureById?: (
+    meetingId: string,
+  ) => Promise<MeetingFailureRow | null>;
+  retryMeetingById?: (
+    meetingId: string,
+    update: RetryMeetingUpdate,
+  ) => Promise<RetryMeetingResult | null>;
 };
 
 export async function deleteMeetingAndArtifacts(
@@ -153,6 +195,67 @@ export async function updateMeetingTitle(
   return result;
 }
 
+export async function retryMeeting(
+  input: { meetingId: string | undefined },
+  options: RetryMeetingOptions = {},
+): Promise<RetryMeetingResult> {
+  if (!isMeetingId(input.meetingId)) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  const meeting = await (
+    options.findMeetingFailureById ?? findMeetingFailureById
+  )(input.meetingId);
+
+  if (meeting === null) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  if (meeting.status !== "error") {
+    throw new MeetingMutationError("Only failed meetings can be retried.", 400);
+  }
+
+  const presentation = getMeetingFailurePresentation(meeting);
+
+  if (presentation === null) {
+    throw new MeetingMutationError("Only failed meetings can be retried.", 400);
+  }
+
+  if (
+    !presentation.isRetryable ||
+    !isRetryableFailedStage(meeting.failedAtStage)
+  ) {
+    throw new MeetingMutationError(
+      presentation.retryUnavailableReason ?? "This failure cannot be retried.",
+      400,
+    );
+  }
+
+  const result = await (options.retryMeetingById ?? retryMeetingById)(
+    meeting.id,
+    createRetryMeetingUpdate(meeting.failedAtStage),
+  );
+
+  if (result === null) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  return result;
+}
+
+function createRetryMeetingUpdate(
+  resumeFromStage: MeetingStatus,
+): RetryMeetingUpdate {
+  return {
+    status: "pending",
+    errorKind: null,
+    errorMessage: null,
+    failedAtStage: null,
+    resumeFromStage,
+    transcriptionProgress: null,
+  };
+}
+
 function validateSpeakerLabel(speakerLabel: unknown) {
   if (
     typeof speakerLabel !== "string" ||
@@ -240,6 +343,25 @@ async function findMeetingById(
   return row ?? null;
 }
 
+async function findMeetingFailureById(
+  meetingId: string,
+): Promise<MeetingFailureRow | null> {
+  const database = await getDatabase();
+  const [row] = await database
+    .select({
+      id: meetings.id,
+      status: meetings.status,
+      errorKind: meetings.errorKind,
+      errorMessage: meetings.errorMessage,
+      failedAtStage: meetings.failedAtStage,
+    })
+    .from(meetings)
+    .where(eq(meetings.id, meetingId))
+    .limit(1);
+
+  return row ?? null;
+}
+
 async function speakerLabelExistsForMeeting(
   meetingId: string,
   speakerLabel: string,
@@ -297,6 +419,38 @@ async function updateTitleById(
     .returning({ id: meetings.id, title: meetings.title });
 
   return row ?? null;
+}
+
+async function retryMeetingById(
+  meetingId: string,
+  update: RetryMeetingUpdate,
+): Promise<RetryMeetingResult | null> {
+  const { sqlClient } = await import("~/db/client.server");
+
+  return sqlClient.begin(async (sql) => {
+    const [row] = await sql`
+      update meetings
+      set
+        status = ${update.status},
+        error_kind = ${update.errorKind},
+        error_message = ${update.errorMessage},
+        failed_at_stage = ${update.failedAtStage},
+        resume_from_stage = ${update.resumeFromStage},
+        transcription_progress = ${update.transcriptionProgress},
+        updated_at = now()
+      where id = ${meetingId}
+        and status = 'error'
+      returning id, resume_from_stage as "resumeFromStage"
+    `;
+
+    if (row === undefined || row.resumeFromStage === null) {
+      return null;
+    }
+
+    await sql`select pg_notify('meetings_pending', ${meetingId})`;
+
+    return { id: row.id, resumeFromStage: row.resumeFromStage };
+  });
 }
 
 async function getDatabase() {

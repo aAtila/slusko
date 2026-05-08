@@ -26,13 +26,13 @@ export type HomeMeetingListRow = {
   status: MeetingStatus;
   transcriptionProgress: number | null;
   durationSeconds: number | null;
+  errorKind: ErrorKind | null;
+  errorMessage: string | null;
+  failedAtStage: MeetingStatus | null;
   createdAt: Date;
 };
 
 export type MeetingDetailRow = HomeMeetingListRow & {
-  errorKind: ErrorKind | null;
-  errorMessage: string | null;
-  failedAtStage: MeetingStatus | null;
   updatedAt: Date;
 };
 
@@ -68,6 +68,9 @@ export async function loadHomeMeetings(): Promise<HomeMeetingListItem[]> {
       status: meetings.status,
       transcriptionProgress: meetings.transcriptionProgress,
       durationSeconds: meetings.durationSeconds,
+      errorKind: meetings.errorKind,
+      errorMessage: meetings.errorMessage,
+      failedAtStage: meetings.failedAtStage,
       createdAt: meetings.createdAt,
     })
     .from(meetings)
@@ -156,9 +159,6 @@ function serializeHomeMeetingRow(row: HomeMeetingListRow): HomeMeetingListItem {
 function serializeMeetingDetailRow(row: MeetingDetailRow): MeetingDetail {
   return {
     ...serializeHomeMeetingRow(row),
-    errorKind: row.errorKind,
-    errorMessage: row.errorMessage,
-    failedAtStage: row.failedAtStage,
     updatedAt: row.updatedAt.toISOString(),
   };
 }

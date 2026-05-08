@@ -4,7 +4,9 @@ import {
   applySpeakerMap,
   formatDuration,
   formatTranscriptTimestamp,
+  getMeetingFailurePresentation,
   getMeetingStatusPresentation,
+  isCorruptAudioNormalizationFailure,
   shouldPollMeetings,
 } from "./meetings-list";
 
@@ -15,6 +17,9 @@ function meeting(overrides: Partial<HomeMeetingListItem>): HomeMeetingListItem {
     status: "done",
     transcriptionProgress: null,
     durationSeconds: null,
+    errorKind: null,
+    errorMessage: null,
+    failedAtStage: null,
     createdAt: "2026-05-05T10:00:00.000Z",
     ...overrides,
   };
@@ -63,6 +68,149 @@ describe("speaker mapping display helpers", () => {
         SPEAKER_01: "Marko",
       }),
     ).toBe("SPEAKER_01 handed off to Marko.");
+  });
+});
+
+describe("meeting failure presentation helpers", () => {
+  test("returns no failure presentation for non-error meetings", () => {
+    expect(
+      getMeetingFailurePresentation(meeting({ status: "done" })),
+    ).toBeNull();
+  });
+
+  test("marks transient normalization failures retryable", () => {
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "normalization_failed",
+          errorMessage: "ffmpeg timed out while preparing audio",
+          failedAtStage: "normalizing",
+        }),
+      ),
+    ).toMatchObject({
+      title: "Audio preparation failed",
+      message:
+        "Audio preparation failed. Retry to prepare the recording again.",
+      isRetryable: true,
+      retryLabel: "Retry from audio preparation",
+    });
+  });
+
+  test("hides retry for corrupt-audio-shaped normalization failures", () => {
+    expect(
+      isCorruptAudioNormalizationFailure({
+        errorKind: "normalization_failed",
+        errorMessage: "moov atom not found while decoding upload.mp4",
+      }),
+    ).toBe(true);
+
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "normalization_failed",
+          errorMessage: "moov atom not found while decoding upload.mp4",
+          failedAtStage: "normalizing",
+        }),
+      ),
+    ).toMatchObject({
+      title: "Recording could not be decoded",
+      isRetryable: false,
+      retryLabel: null,
+    });
+  });
+
+  test("hides retry for transcription-empty and config-missing failures", () => {
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "transcription_empty",
+          errorMessage: "No speech detected.",
+          failedAtStage: "transcribing",
+        }),
+      ),
+    ).toMatchObject({
+      message:
+        "No speech was detected. Upload a different recording with audible speech.",
+      isRetryable: false,
+    });
+
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "config_missing",
+          errorMessage: "OPENROUTER_API_KEY is missing.",
+          failedAtStage: "summarizing",
+        }),
+      ),
+    ).toMatchObject({
+      message:
+        "Processing is blocked by missing server configuration. Ask an administrator to configure the worker.",
+      isRetryable: false,
+    });
+  });
+
+  test("marks diarization and summarization failures retryable from their failed stages", () => {
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "diarization_failed",
+          errorMessage: "speaker clustering failed",
+          failedAtStage: "diarizing",
+        }),
+      ),
+    ).toMatchObject({
+      title: "Speaker identification failed",
+      isRetryable: true,
+      retryLabel: "Retry from speaker identification",
+    });
+
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "summarization_failed",
+          errorMessage: "LLM request failed",
+          failedAtStage: "summarizing",
+        }),
+      ),
+    ).toMatchObject({
+      title: "Summary generation failed",
+      isRetryable: true,
+      retryLabel: "Retry from summarization",
+    });
+  });
+
+  test("requires a retryable failed stage before showing retry", () => {
+    const missingStagePresentation = getMeetingFailurePresentation(
+      meeting({
+        status: "error",
+        errorKind: "diarization_failed",
+        errorMessage: "unexpected",
+        failedAtStage: null,
+      }),
+    );
+
+    expect(missingStagePresentation).toMatchObject({
+      isRetryable: false,
+      retryLabel: null,
+    });
+    expect(missingStagePresentation?.message).not.toContain("Retry");
+
+    expect(
+      getMeetingFailurePresentation(
+        meeting({
+          status: "error",
+          errorKind: "unknown",
+          errorMessage: "unexpected",
+          failedAtStage: "error",
+        }),
+      ),
+    ).toMatchObject({ isRetryable: false, retryLabel: null });
   });
 });
 

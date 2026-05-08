@@ -6,6 +6,7 @@ import { useAppShellChrome, type AppShellChrome } from "~/components/app-shell";
 import type { MeetingStatus } from "~/db/schema";
 import {
   formatDuration,
+  getMeetingFailurePresentation,
   getMeetingStatusPresentation,
   shouldPollMeetings,
   type HomeMeetingListItem,
@@ -503,13 +504,15 @@ function MeetingList({
   );
 }
 
-function MeetingRow({
+export function MeetingRow({
   index,
   meeting,
 }: {
   index: number;
   meeting: HomeMeetingListItem;
 }) {
+  const failurePresentation = getMeetingFailurePresentation(meeting);
+
   return (
     <li>
       <Link
@@ -518,9 +521,16 @@ function MeetingRow({
       >
         <div className="flex min-w-0 items-center gap-5">
           <MeetingIcon status={meeting.status} index={index} />
-          <h2 className="text-ink truncate text-sm font-medium">
-            {meeting.title}
-          </h2>
+          <div className="min-w-0">
+            <h2 className="text-ink truncate text-sm font-medium">
+              {meeting.title}
+            </h2>
+            {failurePresentation ? (
+              <p className="text-danger mt-1 line-clamp-2 text-xs leading-5">
+                {failurePresentation.message}
+              </p>
+            ) : null}
+          </div>
         </div>
         <p className="text-ink-muted text-sm">
           <RelativeUploadDate createdAt={meeting.createdAt} />
@@ -540,13 +550,15 @@ function MeetingRow({
   );
 }
 
-function MeetingCard({
+export function MeetingCard({
   index,
   meeting,
 }: {
   index: number;
   meeting: HomeMeetingListItem;
 }) {
+  const failurePresentation = getMeetingFailurePresentation(meeting);
+
   return (
     <li>
       <Link
@@ -557,6 +569,11 @@ function MeetingCard({
           <MeetingIcon status={meeting.status} index={index} />
           <div className="min-w-0 flex-1">
             <h2 className="text-ink text-sm font-medium">{meeting.title}</h2>
+            {failurePresentation ? (
+              <p className="text-danger mt-1 text-xs leading-5">
+                {failurePresentation.message}
+              </p>
+            ) : null}
             <p className="text-ink-muted mt-2 text-sm">
               <RelativeUploadDate createdAt={meeting.createdAt} />
             </p>

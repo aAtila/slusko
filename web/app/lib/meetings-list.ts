@@ -6,7 +6,13 @@ import type {
   SummaryOpenQuestion,
 } from "~/db/schema";
 
-export type HomeMeetingListItem = {
+export type MeetingFailureFields = {
+  errorKind: ErrorKind | null;
+  errorMessage: string | null;
+  failedAtStage: MeetingStatus | null;
+};
+
+export type HomeMeetingListItem = MeetingFailureFields & {
   id: string;
   title: string;
   status: MeetingStatus;
@@ -16,9 +22,6 @@ export type HomeMeetingListItem = {
 };
 
 export type MeetingDetail = HomeMeetingListItem & {
-  errorKind: ErrorKind | null;
-  errorMessage: string | null;
-  failedAtStage: MeetingStatus | null;
   updatedAt: string;
 };
 
@@ -117,12 +120,207 @@ export type MeetingStatusPresentation = {
   tone: MeetingStatusTone;
 };
 
+export type MeetingFailurePresentation = {
+  isRetryable: boolean;
+  message: string;
+  retryLabel: string | null;
+  retryUnavailableReason: string | null;
+  title: string;
+};
+
+const retryableFailedStages = new Set<MeetingStatus>([
+  "normalizing",
+  "transcribing",
+  "diarizing",
+  "summarizing",
+]);
+
+const corruptAudioMessagePatterns = [
+  "corrupt",
+  "invalid data",
+  "could not read",
+  "unsupported",
+  "no audio stream",
+  "failed to decode",
+  "moov atom not found",
+  "codec not supported",
+];
+
 export function isTerminalMeetingStatus(status: MeetingStatus) {
   return status === "done" || status === "error";
 }
 
 export function shouldPollMeetings(meetings: HomeMeetingListItem[]) {
   return meetings.some((meeting) => !isTerminalMeetingStatus(meeting.status));
+}
+
+export function isRetryableFailedStage(
+  failedAtStage: MeetingStatus | null,
+): failedAtStage is MeetingStatus {
+  return failedAtStage !== null && retryableFailedStages.has(failedAtStage);
+}
+
+export function isCorruptAudioNormalizationFailure({
+  errorKind,
+  errorMessage,
+}: {
+  errorKind: ErrorKind | null;
+  errorMessage: string | null;
+}) {
+  if (errorKind !== "normalization_failed" || errorMessage === null) {
+    return false;
+  }
+
+  const normalizedMessage = errorMessage.toLowerCase();
+
+  return corruptAudioMessagePatterns.some((pattern) =>
+    normalizedMessage.includes(pattern),
+  );
+}
+
+export function getMeetingFailurePresentation({
+  errorKind,
+  errorMessage,
+  failedAtStage,
+  status,
+}: {
+  status: MeetingStatus;
+  errorKind: ErrorKind | null;
+  errorMessage: string | null;
+  failedAtStage: MeetingStatus | null;
+}): MeetingFailurePresentation | null {
+  if (status !== "error") {
+    return null;
+  }
+
+  const canRetryFromStage = isRetryableFailedStage(failedAtStage);
+  const retryUnavailableReason = canRetryFromStage
+    ? "This failure cannot be retried."
+    : "This meeting did not record a retryable failed stage.";
+  const retryLabel = canRetryFromStage
+    ? `Retry from ${getFailedStageLabel(failedAtStage)}`
+    : null;
+
+  if (isCorruptAudioNormalizationFailure({ errorKind, errorMessage })) {
+    return {
+      title: "Recording could not be decoded",
+      message:
+        "The recording could not be decoded. Upload a different audio or video file.",
+      isRetryable: false,
+      retryLabel: null,
+      retryUnavailableReason:
+        "This recording cannot be retried because the file appears to be corrupt or unsupported.",
+    };
+  }
+
+  switch (errorKind) {
+    case "normalization_failed":
+      return {
+        title: "Audio preparation failed",
+        message: canRetryFromStage
+          ? "Audio preparation failed. Retry to prepare the recording again."
+          : "Audio preparation failed before the recording could be prepared.",
+        isRetryable: canRetryFromStage,
+        retryLabel,
+        retryUnavailableReason: canRetryFromStage
+          ? null
+          : retryUnavailableReason,
+      };
+    case "transcription_failed":
+      return {
+        title: "Transcription failed",
+        message: canRetryFromStage
+          ? "Transcription failed. Retry to run transcription again."
+          : "Transcription failed before a retryable stage was recorded.",
+        isRetryable: canRetryFromStage,
+        retryLabel,
+        retryUnavailableReason: canRetryFromStage
+          ? null
+          : retryUnavailableReason,
+      };
+    case "transcription_empty":
+      return {
+        title: "No speech detected",
+        message:
+          "No speech was detected. Upload a different recording with audible speech.",
+        isRetryable: false,
+        retryLabel: null,
+        retryUnavailableReason:
+          "This meeting cannot be retried because no speech was detected.",
+      };
+    case "diarization_failed":
+      return {
+        title: "Speaker identification failed",
+        message: canRetryFromStage
+          ? "Speaker identification failed. Retry to rerun diarization and summarization using the saved transcript."
+          : "Speaker identification failed before a retryable stage was recorded.",
+        isRetryable: canRetryFromStage,
+        retryLabel,
+        retryUnavailableReason: canRetryFromStage
+          ? null
+          : retryUnavailableReason,
+      };
+    case "summarization_failed":
+      return {
+        title: "Summary generation failed",
+        message: canRetryFromStage
+          ? "Summary generation failed. Retry to rerun summarization using the saved transcript."
+          : "Summary generation failed before a retryable stage was recorded.",
+        isRetryable: canRetryFromStage,
+        retryLabel,
+        retryUnavailableReason: canRetryFromStage
+          ? null
+          : retryUnavailableReason,
+      };
+    case "config_missing":
+      return {
+        title: "Server configuration missing",
+        message:
+          "Processing is blocked by missing server configuration. Ask an administrator to configure the worker.",
+        isRetryable: false,
+        retryLabel: null,
+        retryUnavailableReason:
+          "This meeting cannot be retried until the missing server configuration is fixed.",
+      };
+    case "unknown":
+    case null:
+      return {
+        title: "Processing failed unexpectedly",
+        message: canRetryFromStage
+          ? "Processing failed unexpectedly. Retry from the failed stage."
+          : "Processing failed unexpectedly before a retryable stage was recorded.",
+        isRetryable: canRetryFromStage,
+        retryLabel,
+        retryUnavailableReason: canRetryFromStage
+          ? null
+          : retryUnavailableReason,
+      };
+    default: {
+      const exhaustiveErrorKind: never = errorKind;
+      return exhaustiveErrorKind;
+    }
+  }
+}
+
+function getFailedStageLabel(failedAtStage: MeetingStatus) {
+  switch (failedAtStage) {
+    case "normalizing":
+      return "audio preparation";
+    case "transcribing":
+      return "transcription";
+    case "diarizing":
+      return "speaker identification";
+    case "summarizing":
+      return "summarization";
+    case "pending":
+    case "done":
+    case "error":
+      return "the failed stage";
+    default: {
+      const exhaustiveStatus: never = failedAtStage;
+      return exhaustiveStatus;
+    }
+  }
 }
 
 export function formatDuration(seconds: number) {

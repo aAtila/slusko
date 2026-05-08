@@ -1,20 +1,28 @@
 import {
   deleteMeetingAndArtifacts,
   MeetingMutationError,
+  retryMeeting,
   saveSpeakerMapping,
   updateMeetingTitle,
   type DeleteMeetingResult,
+  type RetryMeetingResult,
   type SaveSpeakerMappingResult,
   type UpdateMeetingTitleResult,
 } from "./meetings-mutations.server";
 
 type MeetingDetailActionIntent =
   | "delete-meeting"
+  | "retry-meeting"
   | "save-speaker-mapping"
   | "update-title";
 
 export type MeetingDetailActionData =
   | { ok: true; intent: "update-title"; title: string }
+  | {
+      ok: true;
+      intent: "retry-meeting";
+      resumeFromStage: RetryMeetingResult["resumeFromStage"];
+    }
   | {
       ok: true;
       intent: "save-speaker-mapping";
@@ -45,6 +53,9 @@ type MeetingDetailActionHandlers = {
     speakerLabel: unknown;
     name: unknown;
   }) => Promise<SaveSpeakerMappingResult>;
+  retryMeeting?: (input: {
+    meetingId: string | undefined;
+  }) => Promise<RetryMeetingResult>;
 };
 
 export async function handleMeetingDetailAction(
@@ -88,6 +99,21 @@ export async function handleMeetingDetailAction(
           intent: "save-speaker-mapping",
           speakerLabel: result.speakerLabel,
           name: result.name,
+        },
+      };
+    }
+
+    if (intent === "retry-meeting") {
+      const result = await (handlers.retryMeeting ?? retryMeeting)({
+        meetingId: input.meetingId,
+      });
+
+      return {
+        type: "data",
+        data: {
+          ok: true,
+          intent: "retry-meeting",
+          resumeFromStage: result.resumeFromStage,
         },
       };
     }
@@ -150,6 +176,18 @@ export async function handleMeetingDetailAction(
       };
     }
 
+    if (intent === "retry-meeting") {
+      return {
+        type: "data",
+        data: {
+          ok: false,
+          intent: "retry-meeting",
+          error: "Could not queue this retry. Please try again.",
+        },
+        status: 500,
+      };
+    }
+
     throw error;
   }
 }
@@ -159,6 +197,7 @@ function isMeetingDetailActionIntent(
 ): intent is MeetingDetailActionIntent {
   return (
     intent === "delete-meeting" ||
+    intent === "retry-meeting" ||
     intent === "save-speaker-mapping" ||
     intent === "update-title"
   );

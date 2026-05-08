@@ -62,7 +62,20 @@ with candidate as (
 ), claimed as (
   update meetings as meeting
   set
-    status = case when candidate.claimed_status = 'pending' then 'normalizing' else meeting.status end,
+    status = case
+      when candidate.claimed_status = 'pending'
+        and candidate.resume_from_stage in (
+          'normalizing',
+          'transcribing',
+          'diarizing',
+          'summarizing'
+        )
+        then candidate.resume_from_stage
+      when candidate.claimed_status = 'pending'
+        then 'normalizing'::meeting_status
+      else meeting.status
+    end,
+    resume_from_stage = null,
     transcription_progress = case when candidate.claimed_status = 'pending' then null else meeting.transcription_progress end,
     error_kind = case when candidate.claimed_status = 'pending' then null else meeting.error_kind end,
     error_message = case when candidate.claimed_status = 'pending' then null else meeting.error_message end,
@@ -72,12 +85,22 @@ with candidate as (
   where meeting.id = candidate.id
   returning
     meeting.id,
-    candidate.claimed_status as status,
-    candidate.resume_from_stage,
-    candidate.transcription_progress,
-    candidate.error_kind,
-    candidate.error_message,
-    candidate.failed_at_stage
+    case
+      when candidate.claimed_status = 'pending'
+        and candidate.resume_from_stage in (
+          'normalizing',
+          'transcribing',
+          'diarizing',
+          'summarizing'
+        )
+        then candidate.resume_from_stage
+      else candidate.claimed_status
+    end as status,
+    null::meeting_status as resume_from_stage,
+    case when candidate.claimed_status = 'pending' then null else candidate.transcription_progress end as transcription_progress,
+    case when candidate.claimed_status = 'pending' then null else candidate.error_kind end as error_kind,
+    case when candidate.claimed_status = 'pending' then null else candidate.error_message end as error_message,
+    case when candidate.claimed_status = 'pending' then null else candidate.failed_at_stage end as failed_at_stage
 )
 select * from claimed
 """
@@ -86,6 +109,7 @@ MARK_NORMALIZATION_STARTED_SQL = """
 update meetings
 set
   status = 'normalizing',
+  resume_from_stage = null,
   transcription_progress = null,
   error_kind = null,
   error_message = null,
@@ -104,6 +128,7 @@ MARK_TRANSCRIPTION_STARTED_SQL = """
 update meetings
 set
   status = 'transcribing',
+  resume_from_stage = null,
   duration_seconds = coalesce(%(duration_seconds)s, duration_seconds),
   transcription_progress = 0,
   error_kind = null,
@@ -147,6 +172,7 @@ MARK_TRANSCRIPTION_SUCCEEDED_SQL = """
 update meetings
 set
   status = 'diarizing',
+  resume_from_stage = null,
   transcription_progress = 100,
   error_kind = null,
   error_message = null,
@@ -171,6 +197,7 @@ MARK_DIARIZATION_STARTED_SQL = """
 update meetings
 set
   status = 'diarizing',
+  resume_from_stage = null,
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
@@ -183,6 +210,7 @@ MARK_DIARIZATION_SUCCEEDED_SQL = """
 update meetings
 set
   status = 'summarizing',
+  resume_from_stage = null,
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
@@ -195,6 +223,7 @@ MARK_SUMMARIZATION_STARTED_SQL = """
 update meetings
 set
   status = 'summarizing',
+  resume_from_stage = null,
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
@@ -230,6 +259,7 @@ MARK_SUMMARIZATION_SUCCEEDED_SQL = """
 update meetings
 set
   status = 'done',
+  resume_from_stage = null,
   transcription_progress = 100,
   error_kind = null,
   error_message = null,
@@ -243,6 +273,7 @@ MARK_FAILURE_SQL = """
 update meetings
 set
   status = 'error',
+  resume_from_stage = null,
   error_kind = %(error_kind)s,
   error_message = %(error_message)s,
   failed_at_stage = %(failed_at_stage)s,

@@ -83,7 +83,8 @@ may be silent, music-only, or corrupted.") rather than a generic
 retrying won't help; the user needs to upload different audio.
 
 `failedAtStage` is what makes resumable retry possible — it tells the
-manual-retry path "start from here, don't redo what already worked."
+manual-retry path which stage failed. Manual retry copies that value into
+`resumeFromStage` while putting the row back through the normal pending queue.
 
 ### Retry rules
 
@@ -91,22 +92,29 @@ manual-retry path "start from here, don't redo what already worked."
   OpenRouter 5xx, HuggingFace 5xx): 3 attempts with exponential backoff
   at 1 s, 5 s, 25 s. The user never sees these unless they exhaust.
 - **Manual retry** is a button on the Meeting page. Clicking it transitions
-  the status from `error` back to `failedAtStage` and the worker resumes
-  there. The transcript and any earlier-stage outputs already in the DB
-  are not re-computed.
+  the status from `error` to `pending`, copies the previous `failedAtStage`
+  into `resumeFromStage`, and clears the visible error fields. `resumeFromStage`
+  must be one of the worker stages (`normalizing`, `transcribing`, `diarizing`,
+  or `summarizing`). The worker still claims the row through the same pending
+  queue path; during claim it promotes the row to `resumeFromStage`, clears
+  `resumeFromStage`, and returns that effective stage to the pipeline processor.
+  The transcript and any earlier-stage outputs already in the DB are not
+  re-computed.
 - **Worker crash mid-stage** is recovered by the startup scan from
   ADR 0004: any non-terminal status means "pick up." The pipeline must
   therefore be **idempotent at the stage boundary** — re-entering
   `transcribing` from a crash must not produce duplicate Segment rows.
-- **Hard failures** (corrupt audio, ffmpeg can't decode) still set
-  `status='error'`. The UI uses `errorKind === 'normalization_failed'`
-  to suggest "re-upload or delete" instead of "retry."
+- **Hard failures** (`transcription_empty`, `config_missing`, and corrupt-audio
+  shaped `normalization_failed` failures such as ffmpeg decode errors) still
+  set `status='error'`. The UI hides retry and suggests the appropriate
+  corrective action instead.
 
 ## Consequences
 
-- The Meeting record carries five status-related fields total: `status`,
-  `transcriptionProgress`, `errorKind`, `errorMessage`, `failedAtStage`.
-  All but `status` are nullable. Migration cost is small (one table).
+- The Meeting record carries six status-related fields total: `status`,
+  `transcriptionProgress`, `errorKind`, `errorMessage`, `failedAtStage`, and
+  `resumeFromStage`. All but `status` are nullable. Migration cost is small
+  (one table).
 - The UI has a clear, finite set of states to render — there is no
   combinatorial blowup of "processing + percent + maybe error." Each
   status is a different visual treatment.

@@ -1,11 +1,12 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { removeMeetingDirectory } from "./meeting-storage.server";
 import {
   deleteMeetingAndArtifacts,
   MeetingMutationError,
+  retryMeeting,
   saveSpeakerMapping,
   updateMeetingTitle,
 } from "./meetings-mutations.server";
@@ -194,6 +195,238 @@ describe("speaker mapping mutations", () => {
     expect(missingMeetingError.status).toBe(404);
     expect(findWasCalled).toBe(false);
     expect(persistenceWasCalled).toBe(false);
+  });
+});
+
+describe("meeting retry mutations", () => {
+  test("queues a retry from the failed stage and clears failure fields", async () => {
+    const persistedRows: Array<{
+      meetingId: string;
+      update: {
+        status: "pending";
+        errorKind: null;
+        errorMessage: null;
+        failedAtStage: null;
+        resumeFromStage: string;
+        transcriptionProgress: null;
+      };
+    }> = [];
+
+    const result = await retryMeeting(
+      { meetingId },
+      {
+        findMeetingFailureById: async (id) => ({
+          id,
+          status: "error",
+          errorKind: "diarization_failed",
+          errorMessage: "speaker clustering failed",
+          failedAtStage: "diarizing",
+        }),
+        retryMeetingById: async (id, update) => {
+          persistedRows.push({ meetingId: id, update });
+          return { id, resumeFromStage: update.resumeFromStage };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, resumeFromStage: "diarizing" });
+    expect(persistedRows).toEqual([
+      {
+        meetingId,
+        update: {
+          status: "pending",
+          errorKind: null,
+          errorMessage: null,
+          failedAtStage: null,
+          resumeFromStage: "diarizing",
+          transcriptionProgress: null,
+        },
+      },
+    ]);
+  });
+
+  test("notifies the pending queue in the same transaction when retry is persisted", async () => {
+    const statements: string[] = [];
+    let transactionWasOpened = false;
+
+    mock.module("~/db/client.server", () => ({
+      sqlClient: {
+        begin: async (
+          callback: (
+            sql: (
+              strings: TemplateStringsArray,
+              ...values: unknown[]
+            ) => Promise<Array<{ id: string; resumeFromStage: string | null }>>,
+          ) => Promise<unknown>,
+        ) => {
+          transactionWasOpened = true;
+
+          return callback(async (strings, ...values) => {
+            statements.push(
+              `${Array.from(strings).join("?")} :: ${values.join(",")}`,
+            );
+
+            if (Array.from(strings).join(" ").includes("returning")) {
+              return [{ id: meetingId, resumeFromStage: "diarizing" }];
+            }
+
+            return [];
+          });
+        },
+      },
+    }));
+
+    const result = await retryMeeting(
+      { meetingId },
+      {
+        findMeetingFailureById: async (id) => ({
+          id,
+          status: "error",
+          errorKind: "diarization_failed",
+          errorMessage: "speaker clustering failed",
+          failedAtStage: "diarizing",
+        }),
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, resumeFromStage: "diarizing" });
+    expect(transactionWasOpened).toBe(true);
+    expect(
+      statements.some((statement) => statement.includes("update meetings")),
+    ).toBe(true);
+    expect(
+      statements.some((statement) =>
+        statement.includes("pg_notify('meetings_pending'"),
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects invalid and missing meetings before retry persistence", async () => {
+    let findWasCalled = false;
+    let retryWasCalled = false;
+
+    const invalidIdError = await captureMeetingMutationError(
+      retryMeeting(
+        { meetingId: "not-a-uuid" },
+        {
+          findMeetingFailureById: async () => {
+            findWasCalled = true;
+            return null;
+          },
+          retryMeetingById: async () => {
+            retryWasCalled = true;
+            return { id: meetingId, resumeFromStage: "diarizing" };
+          },
+        },
+      ),
+    );
+
+    const missingMeetingError = await captureMeetingMutationError(
+      retryMeeting(
+        { meetingId },
+        {
+          findMeetingFailureById: async () => null,
+          retryMeetingById: async () => {
+            retryWasCalled = true;
+            return { id: meetingId, resumeFromStage: "diarizing" };
+          },
+        },
+      ),
+    );
+
+    expect(invalidIdError.status).toBe(404);
+    expect(missingMeetingError.status).toBe(404);
+    expect(findWasCalled).toBe(false);
+    expect(retryWasCalled).toBe(false);
+  });
+
+  test("rejects non-error meetings and failures without retryable stages", async () => {
+    const inputs = [
+      {
+        status: "done" as const,
+        errorKind: null,
+        errorMessage: null,
+        failedAtStage: null,
+        message: "Only failed meetings can be retried.",
+      },
+      {
+        status: "error" as const,
+        errorKind: "unknown" as const,
+        errorMessage: "unexpected",
+        failedAtStage: null,
+        message: "This meeting did not record a retryable failed stage.",
+      },
+    ];
+
+    for (const input of inputs) {
+      let retryWasCalled = false;
+      const error = await captureMeetingMutationError(
+        retryMeeting(
+          { meetingId },
+          {
+            findMeetingFailureById: async (id) => ({ id, ...input }),
+            retryMeetingById: async () => {
+              retryWasCalled = true;
+              return { id: meetingId, resumeFromStage: "diarizing" };
+            },
+          },
+        ),
+      );
+
+      expect(error.status).toBe(400);
+      expect(error.message).toBe(input.message);
+      expect(retryWasCalled).toBe(false);
+    }
+  });
+
+  test("rejects non-retryable failure kinds before retry persistence", async () => {
+    const nonRetryableFailures = [
+      {
+        errorKind: "transcription_empty" as const,
+        errorMessage: "No speech detected.",
+        failedAtStage: "transcribing" as const,
+        message:
+          "This meeting cannot be retried because no speech was detected.",
+      },
+      {
+        errorKind: "config_missing" as const,
+        errorMessage: "OPENROUTER_API_KEY is missing.",
+        failedAtStage: "summarizing" as const,
+        message:
+          "This meeting cannot be retried until the missing server configuration is fixed.",
+      },
+      {
+        errorKind: "normalization_failed" as const,
+        errorMessage: "invalid data found while decoding input",
+        failedAtStage: "normalizing" as const,
+        message:
+          "This recording cannot be retried because the file appears to be corrupt or unsupported.",
+      },
+    ];
+
+    for (const failure of nonRetryableFailures) {
+      let retryWasCalled = false;
+      const error = await captureMeetingMutationError(
+        retryMeeting(
+          { meetingId },
+          {
+            findMeetingFailureById: async (id) => ({
+              id,
+              status: "error",
+              ...failure,
+            }),
+            retryMeetingById: async () => {
+              retryWasCalled = true;
+              return { id: meetingId, resumeFromStage: failure.failedAtStage };
+            },
+          },
+        ),
+      );
+
+      expect(error.status).toBe(400);
+      expect(error.message).toBe(failure.message);
+      expect(retryWasCalled).toBe(false);
+    }
   });
 });
 

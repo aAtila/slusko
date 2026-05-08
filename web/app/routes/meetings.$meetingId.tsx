@@ -22,6 +22,7 @@ import {
   createSpeakerMap,
   formatDuration,
   formatTranscriptTimestamp,
+  getMeetingFailurePresentation,
   getMeetingStatusPresentation,
   isTerminalMeetingStatus,
   type MeetingDetail,
@@ -113,6 +114,8 @@ export default function MeetingDetailPage({
     navigation.state !== "idle" && submittingIntent === "delete-meeting";
   const isUpdatingTitle =
     navigation.state !== "idle" && submittingIntent === "update-title";
+  const isRetrying =
+    navigation.state !== "idle" && submittingIntent === "retry-meeting";
   const formattedDuration =
     meeting.durationSeconds === null
       ? "Not available"
@@ -292,7 +295,11 @@ export default function MeetingDetailPage({
               status={meeting.status}
             />
             {meeting.status === "error" ? (
-              <ErrorBlock meeting={meeting} />
+              <ErrorBlock
+                actionData={actionData}
+                isRetrying={isRetrying}
+                meeting={meeting}
+              />
             ) : null}
             <DangerZone
               actionData={actionData}
@@ -1294,7 +1301,21 @@ function DangerZone({
   );
 }
 
-function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
+export function ErrorBlock({
+  actionData,
+  isRetrying = false,
+  meeting,
+}: {
+  actionData?: MeetingActionData;
+  isRetrying?: boolean;
+  meeting: MeetingDetail;
+}) {
+  const presentation = getMeetingFailurePresentation(meeting);
+  const retryError =
+    actionData?.ok === false && actionData.intent === "retry-meeting"
+      ? actionData.error
+      : null;
+
   return (
     <div className="border-danger/25 bg-danger-soft/40 rounded-2xl border p-6 sm:p-8">
       <div className="flex items-start gap-3">
@@ -1303,13 +1324,30 @@ function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
         </span>
         <div>
           <h2 className="font-display text-danger text-xl font-medium tracking-tight">
-            Processing failed
+            {presentation?.title ?? "Processing failed"}
           </h2>
           <p className="text-ink-soft mt-1 text-sm">
-            The pipeline could not complete. Diagnostic details below.
+            {presentation?.message ??
+              "The pipeline could not complete. Diagnostic details below."}
           </p>
         </div>
       </div>
+      {presentation?.isRetryable ? (
+        <Form className="mt-5" method="post" preventScrollReset>
+          <input name="_intent" type="hidden" value="retry-meeting" />
+          <button
+            className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.35)] transition active:translate-y-px disabled:cursor-wait disabled:opacity-60"
+            disabled={isRetrying}
+            type="submit"
+          >
+            <Icon className="size-4" name="refresh" />
+            {isRetrying ? "Queueing retry…" : presentation.retryLabel}
+          </button>
+        </Form>
+      ) : null}
+      {retryError ? (
+        <p className="text-danger mt-4 text-sm font-medium">{retryError}</p>
+      ) : null}
       <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
         <DetailField
           label="Error kind"

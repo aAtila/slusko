@@ -1,13 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import type { MeetingStatus } from "~/db/schema";
 import type {
+  MeetingDetail,
   MeetingSummary,
   SpeakerMap,
   TranscriptSegment,
 } from "~/lib/meetings-list";
 import {
+  ErrorBlock,
   MeetingExportsPanel,
   SummaryPanel,
   TranscriptPanel,
@@ -51,6 +54,31 @@ function renderMeetingExportsPanel(
   return renderToStaticMarkup(<MeetingExportsPanel meetingId={meetingId} />);
 }
 
+function meeting(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
+  return {
+    id: "00000000-0000-4000-8000-000000000123",
+    title: "Retry Test",
+    status: "error",
+    transcriptionProgress: null,
+    durationSeconds: 300,
+    errorKind: "diarization_failed",
+    errorMessage: "speaker clustering failed",
+    failedAtStage: "diarizing",
+    createdAt: "2026-05-05T10:00:00.000Z",
+    updatedAt: "2026-05-05T10:05:00.000Z",
+    ...overrides,
+  };
+}
+
+function renderErrorBlock(props: Parameters<typeof ErrorBlock>[0]) {
+  const router = createMemoryRouter(
+    [{ path: "/", element: <ErrorBlock {...props} /> }],
+    { initialEntries: ["/"] },
+  );
+
+  return renderToStaticMarkup(<RouterProvider router={router} />);
+}
+
 describe("MeetingExportsPanel", () => {
   test("renders copy controls and server-backed markdown download links", () => {
     const markup = renderMeetingExportsPanel();
@@ -77,6 +105,63 @@ describe("MeetingExportsPanel", () => {
     expect(source).not.toContain("new Blob");
     expect(source).not.toContain('value="copy-summary"');
     expect(source).not.toContain('value="copy-full"');
+  });
+});
+
+describe("ErrorBlock", () => {
+  test("renders retry action for retryable diarization failures", () => {
+    const markup = renderErrorBlock({ meeting: meeting() });
+
+    expect(markup).toContain("Speaker identification failed");
+    expect(markup).toContain(
+      "Speaker identification failed. Retry to rerun diarization and summarization using the saved transcript.",
+    );
+    expect(markup).toContain('value="retry-meeting"');
+    expect(markup).toContain("Retry from speaker identification");
+  });
+
+  test("shows queueing label while a retry is submitting", () => {
+    const markup = renderErrorBlock({ isRetrying: true, meeting: meeting() });
+
+    expect(markup).toContain("Queueing retry…");
+  });
+
+  test("hides retry for non-retryable failure kinds", () => {
+    for (const nonRetryableMeeting of [
+      meeting({
+        errorKind: "transcription_empty",
+        errorMessage: "No speech detected.",
+        failedAtStage: "transcribing",
+      }),
+      meeting({
+        errorKind: "config_missing",
+        errorMessage: "OPENROUTER_API_KEY is missing.",
+        failedAtStage: "summarizing",
+      }),
+      meeting({
+        errorKind: "normalization_failed",
+        errorMessage: "invalid data found while processing input",
+        failedAtStage: "normalizing",
+      }),
+    ]) {
+      const markup = renderErrorBlock({ meeting: nonRetryableMeeting });
+
+      expect(markup).not.toContain('value="retry-meeting"');
+      expect(markup).not.toContain("Retry from");
+    }
+  });
+
+  test("renders retry validation feedback", () => {
+    const markup = renderErrorBlock({
+      actionData: {
+        ok: false,
+        intent: "retry-meeting",
+        error: "This failure cannot be retried.",
+      },
+      meeting: meeting(),
+    });
+
+    expect(markup).toContain("This failure cannot be retried.");
   });
 });
 
