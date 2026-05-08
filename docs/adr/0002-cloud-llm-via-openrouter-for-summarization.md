@@ -67,10 +67,18 @@ OpenRouter is chosen over direct provider APIs because:
   credit. Failure modes (out of credit, rate-limited, model deprecated)
   must surface as a `Meeting.status = "error"` with a clear message.
 - Model selection is a runtime config (`OPENROUTER_MODEL`), not a code
-  constant. The default for v1 is **TBD** and should be picked by running
-  the same Serbian transcript through a handful of candidates and judging
-  the output. Likely starting candidates: `anthropic/claude-sonnet-4`,
-  `openai/gpt-4o`, `google/gemini-2.5-pro`.
+  constant. **The v1 default is `anthropic/claude-sonnet-4.5`**, chosen
+  on 2026-05-08 after the maintainer ran representative Serbian and
+  Serbian/English code-switched meetings through it during build-out and
+  judged the outputs production-ready for MVP — overview faithfulness,
+  decision extraction, action item ownership, and preservation of
+  technical/product terms in their original language all met the bar.
+  This is a deliberate update from the PRD-listed `claude-sonnet-4` to
+  the newer point release in the same Anthropic family. The other
+  PRD-listed candidates (`openai/gpt-4o`, `google/gemini-2.5-pro`)
+  remain valid swaps; the model is a runtime env var, so revisiting the
+  default once real-world usage surfaces concrete failure modes costs
+  nothing in code.
 - Personal Claude / ChatGPT subscriptions are **never** used to authenticate
   the worker. Headless agent CLIs are not permitted as the summarization
   backend.

@@ -269,6 +269,22 @@ The transcription-language choice and detected language are **data-model
 fields** on the Meeting (`language`, `detectedLanguage` — see ADR 0013).
 The summary and term-preservation rules remain prompt-level only.
 
+## Summarization model
+
+The default OpenRouter model for v1 is **`anthropic/claude-sonnet-4.5`**.
+It produces solid Serbian and Serbian/English code-switched meeting
+summaries — accurate overviews, clean decision and action item
+extraction, correctly-attributed owners, and faithful preservation of
+technical/product terms in their original language. The v1 MVP ships
+with this default; deeper model A/B comparison is deferred until real
+users surface concrete failure modes.
+
+The model is a runtime env var (`OPENROUTER_MODEL`), not a code
+constant — swapping it is a one-env-var change with no code touch. See
+[ADR 0002](./docs/adr/0002-cloud-llm-via-openrouter-for-summarization.md)
+for why summarization runs through OpenRouter and which other
+PRD-listed candidates are valid alternatives.
+
 ## Access model (v1)
 
 Slusko v1 runs **on the internal network only**, reachable through the
