@@ -166,6 +166,7 @@ class OpenRouterSummarizer:
                     },
                 ],
                 "temperature": 0.2,
+                "response_format": {"type": "json_object"},
             }
         )
         content = _extract_message_content(response)

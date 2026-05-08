@@ -130,6 +130,7 @@ def test_openrouter_summarizer_posts_transcript_and_returns_validated_summary() 
     assert isinstance(payload, dict)
     assert payload["model"] == "anthropic/test-model"
     assert payload["temperature"] == 0.2
+    assert payload["response_format"] == {"type": "json_object"}
     messages = payload["messages"]
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
