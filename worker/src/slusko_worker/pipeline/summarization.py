@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -34,6 +35,8 @@ OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 120.0
 _RETRY_DELAYS_SECONDS = (1.0, 5.0, 25.0)
 _RETRYABLE_STATUS_CODES = {408, 429}
 _SPEAKER_LABEL_RE = re.compile(r"^SPEAKER_\d{2,}$")
+
+logger = logging.getLogger(__name__)
 
 
 class _Response(Protocol):
@@ -166,11 +169,17 @@ class OpenRouterSummarizer:
                     },
                 ],
                 "temperature": 0.2,
-                "response_format": {"type": "json_object"},
+                "provider": {"require_parameters": True},
+                "response_format": _summary_response_format(),
             }
         )
         content = _extract_message_content(response)
-        data = _load_json_object(content)
+        data = _load_json_object(
+            content,
+            meeting=meeting,
+            model=self._model,
+            response_shape=_openrouter_response_shape(response),
+        )
         return _to_summary_draft(data)
 
     def _request_with_retries(self, *, payload: dict[str, object]) -> object:
@@ -230,6 +239,56 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code in _RETRYABLE_STATUS_CODES or 500 <= status_code <= 599
 
 
+def _summary_response_format() -> dict[str, object]:
+    text_item_schema = {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+        "additionalProperties": False,
+    }
+    owner_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": ["name", "speaker", "unknown"]},
+            "value": {"type": "string"},
+        },
+        "required": ["kind"],
+        "additionalProperties": False,
+    }
+    action_item_schema = {
+        "type": "object",
+        "properties": {
+            "task": {"type": "string"},
+            "owner": owner_schema,
+        },
+        "required": ["task", "owner"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "meeting_summary",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "overview": {"type": "string"},
+                    "decisions": {"type": "array", "items": text_item_schema},
+                    "actionItems": {"type": "array", "items": action_item_schema},
+                    "openQuestions": {"type": "array", "items": text_item_schema},
+                },
+                "required": [
+                    "overview",
+                    "decisions",
+                    "actionItems",
+                    "openQuestions",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 def _extract_message_content(response: object) -> str:
     if not isinstance(response, dict):
         raise SummarizationFailed("OpenRouter response was not a JSON object")
@@ -248,14 +307,75 @@ def _extract_message_content(response: object) -> str:
     return content
 
 
-def _load_json_object(content: str) -> object:
+def _load_json_object(
+    content: str,
+    *,
+    meeting: QueuedMeeting,
+    model: str,
+    response_shape: str,
+) -> object:
     try:
         data = json.loads(content)
     except json.JSONDecodeError as error:
+        logger.warning(
+            "OpenRouter summary response was not valid JSON; "
+            "model=%s meeting_id=%s response_shape=%s content_type=%s content_length=%d "
+            "json_error_pos=%d content_line_count=%d starts_with_markdown_fence=%s "
+            "first_non_whitespace_char=%r",
+            model,
+            meeting.id,
+            response_shape,
+            type(content).__name__,
+            len(content),
+            error.pos,
+            content.count("\n") + 1,
+            content.lstrip().startswith("```"),
+            _first_non_whitespace_char(content),
+        )
         raise SummarizationFailed("OpenRouter summary response was not valid JSON") from error
     if not isinstance(data, dict):
         raise SummarizationFailed("OpenRouter summary response must be a JSON object")
     return data
+
+
+def _openrouter_response_shape(response: object) -> str:
+    if not isinstance(response, dict):
+        return f"response_type={type(response).__name__}"
+
+    parts = [f"top_level_keys={sorted(response.keys())!r}"]
+    choices = response.get("choices")
+    if not isinstance(choices, list):
+        parts.append(f"choices_type={type(choices).__name__}")
+        return " ".join(parts)
+
+    parts.append(f"choices_len={len(choices)}")
+    if not choices or not isinstance(choices[0], dict):
+        first_choice_type = type(choices[0]).__name__ if choices else "missing"
+        parts.append(f"first_choice_type={first_choice_type}")
+        return " ".join(parts)
+
+    first_choice = choices[0]
+    parts.append(f"first_choice_keys={sorted(first_choice.keys())!r}")
+    finish_reason = first_choice.get("finish_reason")
+    if finish_reason is not None:
+        parts.append(f"finish_reason={finish_reason!r}")
+    native_finish_reason = first_choice.get("native_finish_reason")
+    if native_finish_reason is not None:
+        parts.append(f"native_finish_reason={native_finish_reason!r}")
+
+    message = first_choice.get("message")
+    if isinstance(message, dict):
+        parts.append(f"message_keys={sorted(message.keys())!r}")
+    else:
+        parts.append(f"message_type={type(message).__name__}")
+    return " ".join(parts)
+
+
+def _first_non_whitespace_char(content: str) -> str | None:
+    stripped = content.lstrip()
+    if not stripped:
+        return None
+    return stripped[0]
 
 
 def _to_summary_draft(data: object) -> SummaryDraft:

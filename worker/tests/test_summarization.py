@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from uuid import UUID
 
+import logging
+
 import httpx
 import pytest
 
@@ -130,7 +132,22 @@ def test_openrouter_summarizer_posts_transcript_and_returns_validated_summary() 
     assert isinstance(payload, dict)
     assert payload["model"] == "anthropic/test-model"
     assert payload["temperature"] == 0.2
-    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["provider"] == {"require_parameters": True}
+    response_format = payload["response_format"]
+    assert isinstance(response_format, dict)
+    assert response_format["type"] == "json_schema"
+    json_schema = response_format["json_schema"]
+    assert isinstance(json_schema, dict)
+    assert json_schema["name"] == "meeting_summary"
+    assert json_schema["strict"] is True
+    schema = json_schema["schema"]
+    assert isinstance(schema, dict)
+    assert schema["required"] == [
+        "overview",
+        "decisions",
+        "actionItems",
+        "openQuestions",
+    ]
     messages = payload["messages"]
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
@@ -237,6 +254,35 @@ def test_openrouter_summarizer_rejects_malformed_or_schema_invalid_responses(
 
     with pytest.raises(SummarizationFailed, match=match):
         summarizer.summarize(meeting=queued_meeting(), transcript_segments=transcript_segments())
+
+
+def test_openrouter_summarizer_logs_invalid_json_response_shape(caplog: pytest.LogCaptureFixture) -> None:
+    body = {"choices": [{"message": {"content": "```json\n{not valid json}\n```"}}]}
+    summarizer = OpenRouterSummarizer(
+        api_key="key",
+        model="anthropic/claude-sonnet-4.5",
+        requester=lambda *_args, **_kwargs: FakeResponse(200, body),
+        sleep=lambda _delay: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="slusko_worker.pipeline.summarization"):
+        with pytest.raises(SummarizationFailed, match="not valid JSON"):
+            summarizer.summarize(
+                meeting=queued_meeting(), transcript_segments=transcript_segments()
+            )
+
+    assert "OpenRouter summary response was not valid JSON" in caplog.text
+    assert "model=anthropic/claude-sonnet-4.5" in caplog.text
+    assert f"meeting_id={MEETING_ID}" in caplog.text
+    assert "response_shape=top_level_keys=['choices']" in caplog.text
+    assert "choices_len=1" in caplog.text
+    assert "message_keys=['content']" in caplog.text
+    assert "content_type=str" in caplog.text
+    assert "content_length=28" in caplog.text
+    assert "json_error_pos=0" in caplog.text
+    assert "content_line_count=3" in caplog.text
+    assert "starts_with_markdown_fence=True" in caplog.text
+    assert "first_non_whitespace_char='`'" in caplog.text
 
 
 def test_openrouter_summarizer_classifies_unauthorized_as_config_missing() -> None:
