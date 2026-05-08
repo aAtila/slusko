@@ -7,7 +7,11 @@ import type {
   SpeakerMap,
   TranscriptSegment,
 } from "~/lib/meetings-list";
-import { SummaryPanel, TranscriptPanel } from "./meetings.$meetingId";
+import {
+  MeetingExportsPanel,
+  SummaryPanel,
+  TranscriptPanel,
+} from "./meetings.$meetingId";
 
 function renderTranscriptPanel({
   segments,
@@ -40,6 +44,41 @@ function renderSummaryPanel({
     <SummaryPanel speakerMap={speakerMap} summary={summary} status={status} />,
   );
 }
+
+function renderMeetingExportsPanel(
+  meetingId = "00000000-0000-4000-8000-000000000123",
+) {
+  return renderToStaticMarkup(<MeetingExportsPanel meetingId={meetingId} />);
+}
+
+describe("MeetingExportsPanel", () => {
+  test("renders copy controls and server-backed markdown download links", () => {
+    const markup = renderMeetingExportsPanel();
+
+    expect(markup).toContain("Copy summary");
+    expect(markup).toContain("Copy full");
+    expect(markup).toContain(
+      'href="/meetings/00000000-0000-4000-8000-000000000123/exports/summary?download=1"',
+    );
+    expect(markup).toContain(
+      'href="/meetings/00000000-0000-4000-8000-000000000123/exports/full?download=1"',
+    );
+  });
+
+  test("keeps copy client-side and downloads as server links", () => {
+    const source = readFileSync(
+      new URL("./meetings.$meetingId.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("fetch(exportPath(flavor))");
+    expect(source).toContain("navigator.clipboard.writeText");
+    expect(source).toContain("?download=1");
+    expect(source).not.toContain("new Blob");
+    expect(source).not.toContain('value="copy-summary"');
+    expect(source).not.toContain('value="copy-full"');
+  });
+});
 
 describe("SummaryPanel", () => {
   test("renders overview, decisions, action items, and open questions read-only", () => {

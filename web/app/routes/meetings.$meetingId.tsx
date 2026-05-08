@@ -16,6 +16,7 @@ import type {
   SummaryActionItemOwner,
 } from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
+import type { MeetingExportFlavor } from "~/lib/meeting-export";
 import {
   applySpeakerMap,
   createSpeakerMap,
@@ -306,6 +307,7 @@ export default function MeetingDetailPage({
               progress={meeting.transcriptionProgress}
               status={meeting.status}
             />
+            <MeetingExportsPanel meetingId={meeting.id} />
             <SpeakersPanel
               durationSeconds={meeting.durationSeconds}
               onSpeakerNameChange={updateSpeakerName}
@@ -459,6 +461,132 @@ function MetaSeparator() {
       ·
     </span>
   );
+}
+
+type MeetingExportCopyState = "idle" | "copying" | "copied" | "failed";
+
+const exportFlavors: Array<{
+  flavor: MeetingExportFlavor;
+  label: string;
+  downloadLabel: string;
+}> = [
+  { downloadLabel: "Summary .md", flavor: "summary", label: "summary" },
+  { downloadLabel: "Full .md", flavor: "full", label: "full" },
+];
+
+export function MeetingExportsPanel({ meetingId }: { meetingId: string }) {
+  const [copyStates, setCopyStates] = useState<
+    Record<MeetingExportFlavor, MeetingExportCopyState>
+  >({ full: "idle", summary: "idle" });
+
+  const setCopyState = (
+    flavor: MeetingExportFlavor,
+    state: MeetingExportCopyState,
+  ) => {
+    setCopyStates((currentCopyStates) => ({
+      ...currentCopyStates,
+      [flavor]: state,
+    }));
+  };
+
+  const exportPath = (flavor: MeetingExportFlavor) =>
+    `/meetings/${meetingId}/exports/${flavor}`;
+
+  const copyMarkdown = async (flavor: MeetingExportFlavor) => {
+    setCopyState(flavor, "copying");
+
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard) {
+        throw new Error("Clipboard API is unavailable.");
+      }
+
+      const response = await fetch(exportPath(flavor));
+
+      if (!response.ok) {
+        throw new Error("Export request failed.");
+      }
+
+      await navigator.clipboard.writeText(await response.text());
+      setCopyState(flavor, "copied");
+    } catch {
+      setCopyState(flavor, "failed");
+    }
+  };
+
+  return (
+    <aside className={railCardClass}>
+      <header>
+        <h2 className="font-display text-ink text-lg font-medium tracking-tight">
+          Export
+        </h2>
+        <p className="text-ink-muted mt-1 text-xs leading-5">
+          Copy or download Markdown generated from the saved meeting data.
+        </p>
+      </header>
+      <div className="mt-5 space-y-4">
+        {exportFlavors.map(({ downloadLabel, flavor, label }) => {
+          const copyState = copyStates[flavor];
+          const feedbackId = `meeting-export-${flavor}-feedback`;
+
+          return (
+            <div className="space-y-2" key={flavor}>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  aria-describedby={feedbackId}
+                  className="border-hairline text-ink-soft hover:bg-surface-sunken inline-flex h-10 items-center justify-center rounded-lg border px-3 text-sm font-medium transition disabled:cursor-wait disabled:opacity-60"
+                  disabled={copyState === "copying"}
+                  onClick={() => void copyMarkdown(flavor)}
+                  type="button"
+                >
+                  {getCopyButtonLabel(copyState, label)}
+                </button>
+                <a
+                  className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-10 items-center justify-center rounded-lg px-3 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.35)] transition active:translate-y-px"
+                  href={`${exportPath(flavor)}?download=1`}
+                >
+                  {downloadLabel}
+                </a>
+              </div>
+              <p
+                className={`text-xs ${
+                  copyState === "failed" ? "text-danger" : "text-ink-muted"
+                }`}
+                id={feedbackId}
+              >
+                {getCopyFeedback(copyState, label)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+function getCopyButtonLabel(
+  state: MeetingExportCopyState,
+  label: string,
+): string {
+  if (state === "copying") return "Copying…";
+  if (state === "copied") return "Copied";
+  if (state === "failed") return "Copy failed";
+  return `Copy ${label}`;
+}
+
+function getCopyFeedback(state: MeetingExportCopyState, label: string): string {
+  if (state === "copied") {
+    return `${capitalize(label)} Markdown copied to clipboard.`;
+  }
+
+  if (state === "failed") {
+    return `Could not copy ${label} Markdown. Try downloading instead.`;
+  }
+
+  return `${capitalize(label)} export uses saved summary and speaker mappings.`;
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 export function SummaryPanel({

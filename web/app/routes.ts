@@ -10,5 +10,9 @@ export default [
     index("routes/home.tsx"),
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
   ]),
+  route(
+    "meetings/:meetingId/exports/:flavor",
+    "routes/meetings.$meetingId.exports.$flavor.ts",
+  ),
   route("api/meetings", "routes/api.meetings.ts"),
 ] satisfies RouteConfig;
