@@ -214,15 +214,15 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       />
       <header className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-normal text-[#10142f] sm:text-4xl">
+          <h1 className="font-display text-ink text-[2.5rem] leading-[1.04] font-medium tracking-[-0.015em] sm:text-[3rem]">
             Meetings
           </h1>
-          <p className="mt-3 text-sm leading-6 text-[#697391] sm:text-base">
+          <p className="text-ink-muted mt-3 text-sm leading-6 sm:text-base">
             Upload, review, and manage meeting transcripts
           </p>
         </div>
         <button
-          className="hidden h-12 items-center justify-center gap-2 rounded-lg bg-[#5947f5] px-6 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(89,71,245,0.22)] transition hover:bg-[#4938dc] disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
+          className="bg-brand text-canvas hover:bg-brand-deep hidden h-12 items-center justify-center gap-2 rounded-lg px-6 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
           disabled={isUploading}
           onClick={openFilePicker}
           type="button"
@@ -233,7 +233,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       </header>
 
       {uploadError ? (
-        <p className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p className="border-danger-soft bg-danger-soft/60 text-danger mt-5 rounded-xl border px-4 py-3 text-sm">
           {uploadError}
         </p>
       ) : null}
@@ -277,26 +277,26 @@ function UploadPanel({
     <div
       className={`mt-8 rounded-2xl border border-dashed px-5 py-10 text-center transition sm:px-8 sm:py-12 ${
         isDraggingRecording
-          ? "border-[#5947f5] bg-[#f5f3ff]"
-          : "border-[#cbc5ff] bg-white"
+          ? "border-brand bg-brand-soft"
+          : "border-hairline-strong bg-surface"
       }`}
     >
-      <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-[#f2f0ff] text-[#5947f5]">
+      <div className="bg-brand-soft text-brand mx-auto flex size-14 items-center justify-center rounded-2xl">
         <Icon name="upload-cloud" className="size-7" />
       </div>
-      <h2 className="mt-5 text-lg font-semibold text-[#151936]">
+      <h2 className="text-ink mt-5 text-lg font-medium">
         Drop audio or video files here
       </h2>
-      <p className="mt-2 text-sm leading-6 text-[#697391]">
+      <p className="text-ink-muted mt-2 text-sm leading-6">
         Supports MP3, WAV, M4A, MP4 and more (max 2 GB)
       </p>
       <button
-        className="mt-4 inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-[#dfe4ef] bg-white px-6 text-sm font-semibold text-[#151936] shadow-sm transition hover:border-[#cbc5ff] disabled:cursor-not-allowed disabled:opacity-60"
+        className="border-hairline bg-surface-elevated text-ink hover:border-brand/40 mt-4 inline-flex h-12 items-center justify-center gap-2 rounded-lg border px-6 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isUploading}
         onClick={onBrowseFiles}
         type="button"
       >
-        <Icon name="folder" className="size-5 text-[#66718c]" />
+        <Icon name="folder" className="text-ink-muted size-5" />
         {isUploading ? "Uploading..." : "Browse files"}
       </button>
     </div>
@@ -329,7 +329,7 @@ function MeetingsToolbar({
         </label>
         <div className="relative">
           <select
-            className="h-11 w-full appearance-none rounded-lg border border-[#dfe4ef] bg-white px-4 pr-10 text-sm font-medium text-[#151936] transition outline-none focus:border-[#5947f5] sm:w-40"
+            className="border-hairline bg-surface-elevated text-ink focus:border-brand h-11 w-full appearance-none rounded-lg border px-4 pr-10 text-sm font-medium transition outline-none sm:w-40"
             id="status-filter"
             onChange={(event) =>
               onStatusFilterChange(
@@ -345,7 +345,7 @@ function MeetingsToolbar({
           </select>
           <Icon
             name="chevron-down"
-            className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-[#66718c]"
+            className="text-ink-muted pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2"
           />
         </div>
         <label className="sr-only" htmlFor="date-filter">
@@ -354,10 +354,10 @@ function MeetingsToolbar({
         <div className="relative">
           <Icon
             name="calendar"
-            className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-[#66718c]"
+            className="text-ink-muted pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2"
           />
           <select
-            className="h-11 w-full appearance-none rounded-lg border border-[#dfe4ef] bg-white pr-10 pl-10 text-sm font-medium text-[#151936] transition outline-none focus:border-[#5947f5] sm:w-44"
+            className="border-hairline bg-surface-elevated text-ink focus:border-brand h-11 w-full appearance-none rounded-lg border pr-10 pl-10 text-sm font-medium transition outline-none sm:w-44"
             id="date-filter"
             onChange={(event) =>
               onDateFilterChange(event.currentTarget.value as DateFilter)
@@ -370,7 +370,7 @@ function MeetingsToolbar({
           </select>
           <Icon
             name="chevron-down"
-            className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-[#66718c]"
+            className="text-ink-muted pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2"
           />
         </div>
       </div>
@@ -382,10 +382,10 @@ function MeetingsToolbar({
           <span className="sr-only">Search meetings</span>
           <Icon
             name="search"
-            className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-[#66718c]"
+            className="text-ink-muted pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2"
           />
           <input
-            className="h-11 w-full rounded-lg border border-[#dfe4ef] bg-white pr-4 pl-12 text-sm text-[#151936] transition outline-none placeholder:text-[#9aa2b8] focus:border-[#5947f5]"
+            className="border-hairline bg-surface-elevated text-ink placeholder:text-ink-subtle focus:border-brand h-11 w-full rounded-lg border pr-4 pl-12 text-sm transition outline-none"
             id="meeting-search"
             onChange={(event) => onSearchTermChange(event.currentTarget.value)}
             placeholder="Search meetings..."
@@ -395,7 +395,7 @@ function MeetingsToolbar({
         </label>
         <button
           aria-label="Reset filters"
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg border border-[#dfe4ef] text-[#66718c] disabled:cursor-not-allowed disabled:opacity-45"
+          className="border-hairline bg-surface-elevated text-ink-muted hover:text-ink inline-flex size-11 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-45"
           disabled={!hasActiveFilter}
           onClick={() => {
             onDateFilterChange("last-30");
@@ -413,12 +413,14 @@ function MeetingsToolbar({
 
 function EmptyMeetings({ isUploading }: { isUploading: boolean }) {
   return (
-    <div className="mt-5 flex min-h-80 w-full flex-col items-center justify-center rounded-2xl border border-[#edf0f7] bg-white px-6 py-16 text-center shadow-[0_12px_35px_rgba(17,24,39,0.04)]">
-      <div className="flex size-14 items-center justify-center rounded-2xl bg-[#f2f0ff] text-[#5947f5]">
+    <div className="border-hairline bg-surface mt-5 flex min-h-80 w-full flex-col items-center justify-center rounded-2xl border px-6 py-16 text-center shadow-[0_1px_0_rgba(28,27,24,0.04),0_18px_40px_-24px_rgba(28,27,24,0.12)]">
+      <div className="bg-brand-soft text-brand flex size-14 items-center justify-center rounded-2xl">
         <Icon name="upload-cloud" className="size-7" />
       </div>
-      <h2 className="mt-6 text-2xl font-semibold">No meetings yet</h2>
-      <p className="mt-3 max-w-md text-sm leading-6 text-[#697391]">
+      <h2 className="font-display mt-6 text-2xl font-medium tracking-tight">
+        No meetings yet
+      </h2>
+      <p className="text-ink-muted mt-3 max-w-md text-sm leading-6">
         {isUploading
           ? "Uploading your recording and queueing the meeting..."
           : "Drag and drop an audio or video recording here, or use New Meeting to upload your first conversation."}
@@ -436,9 +438,9 @@ function MeetingList({
 }) {
   if (meetings.length === 0) {
     return (
-      <div className="mt-5 rounded-2xl border border-[#edf0f7] bg-white px-6 py-14 text-center shadow-[0_12px_35px_rgba(17,24,39,0.04)]">
-        <h2 className="text-lg font-semibold">No matching meetings</h2>
-        <p className="mt-2 text-sm text-[#697391]">
+      <div className="border-hairline bg-surface mt-5 rounded-2xl border px-6 py-14 text-center shadow-[0_1px_0_rgba(28,27,24,0.04),0_18px_40px_-24px_rgba(28,27,24,0.12)]">
+        <h2 className="text-ink text-lg font-medium">No matching meetings</h2>
+        <p className="text-ink-muted mt-2 text-sm">
           Adjust your search or status filter to see more meetings.
         </p>
       </div>
@@ -447,11 +449,11 @@ function MeetingList({
 
   return (
     <div
-      className="mt-5 overflow-hidden rounded-2xl border border-[#edf0f7] bg-white shadow-[0_12px_35px_rgba(17,24,39,0.04)]"
+      className="border-hairline bg-surface mt-5 overflow-hidden rounded-2xl border shadow-[0_1px_0_rgba(28,27,24,0.04),0_18px_40px_-24px_rgba(28,27,24,0.12)]"
       id="meetings-list"
     >
       <div className="hidden md:block">
-        <div className="grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(110px,0.45fr)_minmax(150px,0.55fr)] border-b border-[#edf0f7] px-6 py-4 text-xs font-semibold text-[#66718c] uppercase">
+        <div className="border-hairline text-ink-muted grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(110px,0.45fr)_minmax(150px,0.55fr)] border-b px-6 py-4 text-xs font-medium tracking-[0.08em] uppercase">
           <div>Meeting</div>
           <div className="flex items-center gap-2">
             Uploaded
@@ -460,36 +462,36 @@ function MeetingList({
           <div>Duration</div>
           <div>Status</div>
         </div>
-        <ul className="divide-y divide-[#edf0f7]">
+        <ul className="divide-hairline divide-y">
           {meetings.map((meeting, index) => (
             <MeetingRow index={index} key={meeting.id} meeting={meeting} />
           ))}
         </ul>
       </div>
-      <ul className="divide-y divide-[#edf0f7] md:hidden">
+      <ul className="divide-hairline divide-y md:hidden">
         {meetings.map((meeting, index) => (
           <MeetingCard index={index} key={meeting.id} meeting={meeting} />
         ))}
       </ul>
-      <div className="flex flex-col gap-4 border-t border-[#edf0f7] px-5 py-4 text-sm text-[#66718c] sm:flex-row sm:items-center sm:justify-between">
+      <div className="border-hairline text-ink-muted flex flex-col gap-4 border-t px-5 py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
         <p>
           Showing 1-{meetings.length} of {totalMeetings} meetings
         </p>
         <div className="flex items-center gap-2">
           <button
             aria-label="Previous page"
-            className="inline-flex size-9 items-center justify-center rounded-lg border border-[#dfe4ef] text-[#66718c] disabled:opacity-40"
+            className="border-hairline text-ink-muted inline-flex size-9 items-center justify-center rounded-lg border disabled:opacity-40"
             disabled
             type="button"
           >
             <Icon name="chevron-left" className="size-4" />
           </button>
-          <span className="inline-flex size-9 items-center justify-center rounded-lg border border-[#5947f5] text-sm font-semibold text-[#5947f5]">
+          <span className="border-brand bg-brand-soft text-brand inline-flex size-9 items-center justify-center rounded-lg border text-sm font-medium">
             1
           </span>
           <button
             aria-label="Next page"
-            className="inline-flex size-9 items-center justify-center rounded-lg border border-[#dfe4ef] text-[#66718c] disabled:opacity-40"
+            className="border-hairline text-ink-muted inline-flex size-9 items-center justify-center rounded-lg border disabled:opacity-40"
             disabled
             type="button"
           >
@@ -511,19 +513,19 @@ function MeetingRow({
   return (
     <li>
       <Link
-        className="grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(110px,0.45fr)_minmax(150px,0.55fr)] items-center gap-4 px-6 py-4 transition hover:bg-[#fafbff]"
+        className="hover:bg-canvas grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(110px,0.45fr)_minmax(150px,0.55fr)] items-center gap-4 px-6 py-4 transition"
         to={`/meetings/${meeting.id}`}
       >
         <div className="flex min-w-0 items-center gap-5">
           <MeetingIcon status={meeting.status} index={index} />
-          <h2 className="truncate text-sm font-semibold text-[#151936]">
+          <h2 className="text-ink truncate text-sm font-medium">
             {meeting.title}
           </h2>
         </div>
-        <p className="text-sm text-[#697391]">
+        <p className="text-ink-muted text-sm">
           <RelativeUploadDate createdAt={meeting.createdAt} />
         </p>
-        <p className="flex items-center gap-2 text-sm text-[#697391]">
+        <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
           <Icon name="clock" className="size-4" />
           {meeting.durationSeconds !== null
             ? formatDuration(meeting.durationSeconds)
@@ -548,22 +550,20 @@ function MeetingCard({
   return (
     <li>
       <Link
-        className="flex flex-col gap-4 px-5 py-5 transition hover:bg-[#fafbff]"
+        className="hover:bg-canvas flex flex-col gap-4 px-5 py-5 transition"
         to={`/meetings/${meeting.id}`}
       >
         <div className="flex items-start gap-4">
           <MeetingIcon status={meeting.status} index={index} />
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-[#151936]">
-              {meeting.title}
-            </h2>
-            <p className="mt-2 text-sm text-[#697391]">
+            <h2 className="text-ink text-sm font-medium">{meeting.title}</h2>
+            <p className="text-ink-muted mt-2 text-sm">
               <RelativeUploadDate createdAt={meeting.createdAt} />
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="flex items-center gap-2 text-sm text-[#697391]">
+          <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
             <Icon name="clock" className="size-4" />
             {meeting.durationSeconds !== null
               ? formatDuration(meeting.durationSeconds)
@@ -588,19 +588,19 @@ function MeetingIcon({
 }) {
   const palette =
     status === "error"
-      ? "from-red-500 to-red-600 text-white"
+      ? "bg-danger-soft text-danger"
       : [
-          "from-[#e8e4ff] to-[#d8d1ff] text-[#5947f5]",
-          "from-[#3575ff] to-[#5947f5] text-white",
-          "from-[#ffb11f] to-[#ff8b18] text-white",
-          "from-[#e8e4ff] to-[#d8d1ff] text-[#5947f5]",
-          "from-[#4fc499] to-[#2cae7f] text-white",
+          "bg-brand-soft text-brand",
+          "bg-accent-soft text-accent-deep",
+          "bg-warning-soft text-warning",
+          "bg-success-soft text-success",
+          "bg-[#e3dde9] text-[#5e4a73]",
         ][index % 5];
   const icons: IconName[] = ["users", "chart", "megaphone", "file", "users"];
 
   return (
     <span
-      className={`flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${palette}`}
+      className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${palette}`}
     >
       <Icon
         name={status === "error" ? "alert" : icons[index % icons.length]}
@@ -622,23 +622,24 @@ function StatusBadge({
     transcriptionProgress: progress,
   });
   const toneStyles: Record<MeetingStatusTone, string> = {
-    active: "border-blue-100 bg-blue-50 text-blue-700",
-    danger: "border-red-100 bg-red-50 text-red-700",
-    queued: "border-violet-100 bg-violet-50 text-violet-700",
-    success: "border-emerald-100 bg-emerald-50 text-emerald-700",
-  };
-  const iconName: Record<MeetingStatusTone, IconName> = {
-    active: "refresh",
-    danger: "alert",
-    queued: "upload",
-    success: "check",
+    active: "border-brand/20 bg-brand-soft text-brand",
+    danger: "border-danger/20 bg-danger-soft text-danger",
+    queued: "border-hairline bg-surface-sunken text-ink-soft",
+    success: "border-success/20 bg-success-soft text-success",
   };
 
   return (
     <span
-      className={`inline-flex w-fit items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold ${toneStyles[presentation.tone]}`}
+      className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-[0.04em] uppercase ${toneStyles[presentation.tone]}`}
     >
-      <Icon name={iconName[presentation.tone]} className="size-4" />
+      <span
+        aria-hidden="true"
+        className={`size-1.5 rounded-full ${
+          presentation.tone === "active"
+            ? "bg-brand animate-pulse"
+            : "bg-current"
+        }`}
+      />
       {presentation.label}
     </span>
   );

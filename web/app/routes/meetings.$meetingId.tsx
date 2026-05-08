@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   data,
   Form,
@@ -8,7 +8,12 @@ import {
   useNavigation,
   useRevalidator,
 } from "react-router";
-import type { MeetingStatus, SummaryActionItemOwner } from "~/db/schema";
+import { Icon, type IconName } from "~/components/app-icons";
+import type {
+  MeetingStatus,
+  SummaryActionItem,
+  SummaryActionItemOwner,
+} from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import {
   formatDuration,
@@ -21,6 +26,12 @@ import {
   type TranscriptSegment,
 } from "~/lib/meetings-list";
 import type { Route } from "./+types/meetings.$meetingId";
+
+const cardClass =
+  "rounded-2xl border border-hairline bg-surface p-6 shadow-[0_1px_0_rgba(28,27,24,0.04),0_18px_40px_-24px_rgba(28,27,24,0.12)] sm:p-8";
+
+const railCardClass =
+  "rounded-2xl border border-hairline bg-surface p-6 shadow-[0_1px_0_rgba(28,27,24,0.04),0_18px_40px_-24px_rgba(28,27,24,0.12)]";
 
 export function meta({ data }: Route.MetaArgs) {
   const title = data?.meeting.title ?? "Meeting";
@@ -70,10 +81,6 @@ export default function MeetingDetailPage({
   const [titleDraft, setTitleDraft] = useState(meeting.title);
   const [titleFeedback, setTitleFeedback] = useState<MeetingActionData>();
   const { revalidate } = useRevalidator();
-  const presentation = getMeetingStatusPresentation({
-    status: meeting.status,
-    transcriptionProgress: meeting.transcriptionProgress,
-  });
 
   useEffect(() => {
     if (isTerminalMeetingStatus(meeting.status)) {
@@ -94,7 +101,7 @@ export default function MeetingDetailPage({
     navigation.state !== "idle" && submittingIntent === "update-title";
   const formattedDuration =
     meeting.durationSeconds === null
-      ? "Not available yet"
+      ? "Not available"
       : formatDuration(meeting.durationSeconds);
   const titleFeedbackId = "meeting-title-feedback";
   const uploadedLabel = formatMeetingDate(meeting.createdAt);
@@ -130,226 +137,199 @@ export default function MeetingDetailPage({
   };
 
   return (
-    <section className="min-w-0 flex-1 text-slate-950">
-      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
-        <header className="border-b border-slate-200 pb-6">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
-              <Link
-                className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-indigo-600"
-                to="/"
-              >
-                <span aria-hidden="true">‹</span>
-                Back to Meetings
-              </Link>
+    <section className="text-ink min-w-0 flex-1">
+      <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
+        <Link
+          className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 text-sm font-medium transition"
+          to="/"
+        >
+          <Icon name="chevron-left" className="size-4" />
+          Back to meetings
+        </Link>
 
-              <div className="mt-6 min-w-0">
-                {isEditingTitle ? (
-                  <Form className="space-y-3" method="post" preventScrollReset>
-                    <input name="_intent" type="hidden" value="update-title" />
-                    <label className="sr-only" htmlFor="meeting-title">
-                      Meeting title
-                    </label>
-                    <div className="flex flex-col gap-3 md:flex-row">
-                      <input
-                        aria-describedby={titleFeedbackId}
-                        aria-invalid={
-                          titleFeedback?.ok === false && isEditingTitle
-                            ? true
-                            : undefined
-                        }
-                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-4 py-3 text-2xl font-semibold tracking-tight text-slate-950 transition outline-none placeholder:text-slate-400 focus:border-indigo-500 sm:text-3xl"
-                        disabled={isDeleting || isUpdatingTitle}
-                        id="meeting-title"
-                        maxLength={200}
-                        name="title"
-                        onChange={(event) => setTitleDraft(event.target.value)}
-                        required
-                        value={titleDraft}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          className="inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={isDeleting || isUpdatingTitle}
-                          type="submit"
-                        >
-                          {isUpdatingTitle ? "Saving…" : "Save"}
-                        </button>
-                        <button
-                          className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={isUpdatingTitle}
-                          onClick={cancelTitleEdit}
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                    <TitleFeedback
-                      actionData={isEditingTitle ? titleFeedback : undefined}
-                      feedbackId={titleFeedbackId}
-                    />
-                  </Form>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <h1 className="min-w-0 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-                        {meeting.title}
-                      </h1>
-                      <button
-                        aria-label="Edit meeting title"
-                        className="mt-1 inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-slate-50 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={isDeleting || isUpdatingTitle}
-                        onClick={beginTitleEdit}
-                        type="button"
-                      >
-                        ✎
-                      </button>
-                    </div>
-                    <TitleFeedback
-                      actionData={!isEditingTitle ? titleFeedback : undefined}
-                      feedbackId={titleFeedbackId}
-                    />
-                  </div>
-                )}
-              </div>
+        <header className="border-hairline mt-6 border-b pb-8">
+          {isEditingTitle ? (
+            <TitleEditor
+              draft={titleDraft}
+              feedback={titleFeedback}
+              feedbackId={titleFeedbackId}
+              isDeleting={isDeleting}
+              isUpdatingTitle={isUpdatingTitle}
+              onCancel={cancelTitleEdit}
+              onChange={setTitleDraft}
+            />
+          ) : (
+            <TitleDisplay
+              feedback={titleFeedback}
+              feedbackId={titleFeedbackId}
+              isDisabled={isDeleting || isUpdatingTitle}
+              onBeginEdit={beginTitleEdit}
+              progress={meeting.transcriptionProgress}
+              status={meeting.status}
+              title={meeting.title}
+            />
+          )}
 
-              <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
-                <InlineMeta label="Uploaded" value={uploadedLabel} />
-                <InlineMeta label="Duration" value={formattedDuration} />
-                <InlineMeta
-                  label="Speakers"
-                  value={`${speakerStats.length || 1} speaker${
-                    speakerStats.length === 1 ? "" : "s"
-                  }`}
-                />
-                <div className="flex items-center gap-2">
-                  <dt className="sr-only">Status</dt>
-                  <dd>
-                    <StatusBadge
-                      progress={meeting.transcriptionProgress}
-                      status={meeting.status}
-                    />
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50">
-                <span aria-hidden="true">↗</span>
-                Share
-              </button>
-              <button
-                aria-label="More meeting actions"
-                className="inline-flex size-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg leading-none text-slate-700 shadow-sm transition hover:bg-slate-50"
-              >
-                …
-              </button>
-              <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-200 transition hover:bg-indigo-500">
-                <span aria-hidden="true">↓</span>
-                Export
-              </button>
-            </div>
-          </div>
+          <dl className="mt-7 flex flex-wrap items-center gap-x-7 gap-y-3 text-sm">
+            <MetaItem icon="calendar" label="Uploaded" value={uploadedLabel} />
+            <MetaItem
+              icon="clock"
+              label="Duration"
+              mono
+              value={formattedDuration}
+            />
+            <MetaItem
+              icon="users"
+              label="Speakers"
+              value={`${speakerStats.length || 1} ${
+                speakerStats.length === 1 ? "speaker" : "speakers"
+              }`}
+            />
+          </dl>
         </header>
 
-        <div className="mt-5 overflow-x-auto border-b border-slate-200">
-          <nav className="flex min-w-max gap-8 text-sm font-medium text-slate-600">
-            {[
-              "Overview",
-              "Transcript",
-              "Timeline",
-              "Speakers",
-              "Highlights",
-              "Notes",
-              "AI Chat",
-            ].map((tab, index) => (
-              <a
-                className={`border-b-2 px-1 pb-4 transition ${
-                  index === 0
-                    ? "border-indigo-600 text-indigo-600"
-                    : "border-transparent hover:border-slate-300 hover:text-slate-950"
-                }`}
-                href={`#${tab.toLowerCase().replaceAll(" ", "-")}`}
-                key={tab}
-              >
-                {tab}
-              </a>
-            ))}
-          </nav>
-        </div>
-
-        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 space-y-4">
-            <SummaryPanel summary={summary} status={meeting.status} />
-            <AudioScrubber duration={formattedDuration} />
+        <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-w-0 space-y-6">
+            <SummaryPanel status={meeting.status} summary={summary} />
             <TranscriptPanel
               segments={transcriptSegments}
               status={meeting.status}
             />
-
             {meeting.status === "error" ? (
               <ErrorBlock meeting={meeting} />
             ) : null}
-
-            <section className="rounded-lg border border-orange-200 bg-orange-50 p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-base font-semibold text-orange-950">
-                    Delete meeting
-                  </h2>
-                  <p className="mt-1 text-sm text-orange-800">
-                    Removes this meeting record and its stored audio artifacts.
-                  </p>
-                  {actionData?.ok === false &&
-                  actionData.intent === "delete-meeting" ? (
-                    <p className="mt-3 text-sm font-medium text-orange-800">
-                      {actionData.error}
-                    </p>
-                  ) : null}
-                </div>
-                <Form
-                  method="post"
-                  onSubmit={(event) => {
-                    if (
-                      !window.confirm(
-                        "Delete this meeting and its stored audio artifacts? This cannot be undone.",
-                      )
-                    ) {
-                      event.preventDefault();
-                    }
-                  }}
-                >
-                  <input name="_intent" type="hidden" value="delete-meeting" />
-                  <button
-                    className="inline-flex h-10 items-center justify-center rounded-lg border border-orange-300 px-4 text-sm font-semibold text-orange-950 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={isDeleting || isUpdatingTitle}
-                    type="submit"
-                  >
-                    {isDeleting ? "Deleting…" : "Delete meeting"}
-                  </button>
-                </Form>
-              </div>
-            </section>
+            <DangerZone
+              actionData={actionData}
+              isDeleting={isDeleting}
+              isUpdatingTitle={isUpdatingTitle}
+            />
           </div>
 
-          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+          <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+            <ProcessingPanel
+              failedAtStage={meeting.failedAtStage}
+              progress={meeting.transcriptionProgress}
+              status={meeting.status}
+            />
             <SpeakersPanel
               durationSeconds={meeting.durationSeconds}
               speakers={speakerStats}
             />
             <HighlightsPanel topics={keyTopics} />
-            <NotesPanel summary={summary} uploadedLabel={uploadedLabel} />
-            <PipelinePanel
-              duration={formattedDuration}
-              presentationLabel={presentation.label}
-              uploadedLabel={formatUploadedAt(meeting.createdAt)}
-            />
           </aside>
         </div>
       </div>
     </section>
+  );
+}
+
+function TitleDisplay({
+  feedback,
+  feedbackId,
+  isDisabled,
+  onBeginEdit,
+  progress,
+  status,
+  title,
+}: {
+  feedback: MeetingActionData | undefined;
+  feedbackId: string;
+  isDisabled: boolean;
+  onBeginEdit: () => void;
+  progress: number | null;
+  status: MeetingStatus;
+  title: string;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+        <h1 className="font-display text-ink min-w-0 text-[2.25rem] leading-[1.05] font-medium tracking-[-0.015em] sm:text-[2.75rem]">
+          {title}
+        </h1>
+        <button
+          aria-label="Edit meeting title"
+          className="text-ink-subtle hover:bg-surface-sunken hover:text-ink focus-visible:bg-surface-sunken focus-visible:text-ink inline-flex size-8 shrink-0 items-center justify-center rounded-md transition disabled:cursor-not-allowed disabled:opacity-30"
+          disabled={isDisabled}
+          onClick={onBeginEdit}
+          type="button"
+        >
+          <Icon className="size-4" name="pencil" />
+        </button>
+      </div>
+      <div className="flex items-center gap-3">
+        <StatusBadge progress={progress} status={status} />
+      </div>
+      <TitleFeedback actionData={feedback} feedbackId={feedbackId} />
+    </div>
+  );
+}
+
+function TitleEditor({
+  draft,
+  feedback,
+  feedbackId,
+  isDeleting,
+  isUpdatingTitle,
+  onCancel,
+  onChange,
+}: {
+  draft: string;
+  feedback: MeetingActionData | undefined;
+  feedbackId: string;
+  isDeleting: boolean;
+  isUpdatingTitle: boolean;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+}) {
+  const isInvalid =
+    feedback?.intent === "update-title" && feedback.ok === false;
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <Form className="space-y-3" method="post" preventScrollReset>
+      <input name="_intent" type="hidden" value="update-title" />
+      <label className="sr-only" htmlFor="meeting-title">
+        Meeting title
+      </label>
+      <div className="flex flex-col gap-3 md:flex-row">
+        <input
+          aria-describedby={feedbackId}
+          aria-invalid={isInvalid ? true : undefined}
+          className="font-display border-hairline-strong bg-surface-elevated text-ink placeholder:text-ink-subtle focus:border-brand min-w-0 flex-1 rounded-xl border px-4 py-3 text-[1.875rem] leading-[1.1] font-medium tracking-[-0.015em] transition outline-none sm:text-[2.25rem]"
+          disabled={isDeleting || isUpdatingTitle}
+          id="meeting-title"
+          maxLength={200}
+          name="title"
+          onChange={(event) => onChange(event.target.value)}
+          ref={inputRef}
+          required
+          value={draft}
+        />
+        <div className="flex gap-2">
+          <button
+            className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-11 items-center justify-center rounded-lg px-4 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isDeleting || isUpdatingTitle}
+            type="submit"
+          >
+            {isUpdatingTitle ? "Saving…" : "Save"}
+          </button>
+          <button
+            className="border-hairline text-ink-soft hover:bg-surface-sunken inline-flex h-11 items-center justify-center rounded-lg border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isUpdatingTitle}
+            onClick={onCancel}
+            type="button"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+      <TitleFeedback actionData={feedback} feedbackId={feedbackId} />
+    </Form>
   );
 }
 
@@ -366,64 +346,38 @@ function TitleFeedback({
 
   if (!actionData.ok) {
     return (
-      <p className="text-sm font-medium text-orange-800" id={feedbackId}>
+      <p className="text-danger text-sm font-medium" id={feedbackId}>
         {actionData.error}
       </p>
     );
   }
 
   return (
-    <p className="text-sm font-medium text-emerald-700" id={feedbackId}>
+    <p className="text-success text-sm font-medium" id={feedbackId}>
       Title saved as “{actionData.title}”.
     </p>
   );
 }
 
-function InlineMeta({ label, value }: { label: string; value: string }) {
+function MetaItem({
+  icon,
+  label,
+  mono,
+  value,
+}: {
+  icon: IconName;
+  label: string;
+  mono?: boolean;
+  value: string;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="font-medium text-slate-700">{value}</dd>
+    <div className="text-ink-soft flex items-center gap-2">
+      <Icon className="text-ink-muted size-4" name={icon} />
+      <dt className="sr-only">{label}</dt>
+      <dd className={mono ? "font-mono text-[13px] tabular-nums" : ""}>
+        {value}
+      </dd>
     </div>
-  );
-}
-
-function AudioScrubber({ duration }: { duration: string }) {
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm shadow-slate-100">
-      <div className="flex items-center gap-4">
-        <button
-          aria-label="Play recording"
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white shadow-sm shadow-indigo-200"
-          type="button"
-        >
-          ▶
-        </button>
-        <span className="hidden text-sm font-medium text-slate-500 sm:inline">
-          0:00
-        </span>
-        <div className="flex h-10 min-w-0 flex-1 items-center gap-1 overflow-hidden">
-          {Array.from({ length: 72 }).map((_, index) => (
-            <span
-              className={`w-0.5 shrink-0 rounded-full ${
-                index < 8 ? "bg-indigo-500" : "bg-slate-300"
-              }`}
-              key={`waveform-${index}`}
-              style={{ height: `${8 + ((index * 7) % 24)}px` }}
-            />
-          ))}
-        </div>
-        <span className="hidden text-sm font-medium text-slate-500 sm:inline">
-          {duration}
-        </span>
-        <button
-          className="hidden h-9 items-center justify-center rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 sm:inline-flex"
-          type="button"
-        >
-          1x
-        </button>
-      </div>
-    </section>
   );
 }
 
@@ -445,89 +399,48 @@ export function SummaryPanel({
   const keyTopics = getKeyTopics(summary, []);
 
   return (
-    <article
-      className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm shadow-slate-100 sm:p-6"
-      id="overview"
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="flex items-center gap-3 text-xl font-semibold text-slate-950">
-          <span className="text-indigo-600" aria-hidden="true">
-            ✦
-          </span>
+    <article className={cardClass} id="overview">
+      <header className="flex flex-wrap items-center gap-3">
+        <h2 className="font-display text-ink text-2xl font-medium tracking-tight">
           Summary
         </h2>
-        <button
-          className="inline-flex h-10 w-fit items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50"
-          type="button"
-        >
-          ✎ Edit
-        </button>
-      </div>
+        <span
+          aria-hidden="true"
+          className="bg-hairline hidden h-px flex-1 sm:block"
+        />
+        <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase">
+          Auto-generated
+        </span>
+      </header>
+
       {summary === null ? (
-        <p className="mt-3 text-sm leading-6 text-slate-600">{emptyMessage}</p>
+        <EmptyState>{emptyMessage}</EmptyState>
       ) : (
-        <div className="mt-4 space-y-5">
+        <div className="mt-6 space-y-7">
           <section>
             <h3 className="sr-only">Overview</h3>
-            <p className="text-base leading-7 text-slate-800">
+            <p className="text-ink-soft text-base leading-7">
               {summary.overview}
             </p>
           </section>
 
-          <div className="grid gap-5 border-t border-slate-200 pt-5 md:grid-cols-3">
+          <div className="border-hairline grid gap-7 border-t pt-7 md:grid-cols-3">
             <SummaryList
               emptyText="No key topics recorded."
               items={keyTopics.map((topic, index) => ({
-                id: `topic-${index}`,
                 content: topic.label,
+                id: `topic-${index}`,
                 meta: topic.timestamp,
               }))}
-              marker="•"
-              title="Key Topics"
+              title="Key topics"
             />
-
-            <section>
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-                <span className="text-emerald-600" aria-hidden="true">
-                  ✓
-                </span>
-                Action items
-              </h3>
-              {summary.actionItems.length === 0 ? (
-                <p className="mt-3 text-sm leading-6 text-slate-600">
-                  No action items recorded.
-                </p>
-              ) : (
-                <ol className="mt-3 space-y-3">
-                  {summary.actionItems.slice(0, 4).map((item, index) => (
-                    <li className="flex gap-3" key={`action-item-${index}`}>
-                      <span
-                        aria-hidden="true"
-                        className="mt-1 flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[10px] text-white"
-                      >
-                        ✓
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm leading-5 text-slate-800">
-                          {item.task}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Owner: {renderActionItemOwner(item.owner)}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </section>
-
+            <ActionItemsList items={summary.actionItems} />
             <SummaryList
               emptyText="No decisions recorded."
               items={summary.decisions.map((decision, index) => ({
-                id: `decision-${index}`,
                 content: decision.text,
+                id: `decision-${index}`,
               }))}
-              marker="✓"
               title="Decisions"
             />
           </div>
@@ -535,10 +448,9 @@ export function SummaryPanel({
           <SummaryList
             emptyText="No open questions recorded."
             items={summary.openQuestions.map((question, index) => ({
-              id: `open-question-${index}`,
               content: question.text,
+              id: `open-question-${index}`,
             }))}
-            marker="?"
             title="Open questions"
           />
         </div>
@@ -550,38 +462,68 @@ export function SummaryPanel({
 function SummaryList({
   emptyText,
   items,
-  marker = "•",
   title,
 }: {
   emptyText: string;
   items: { content: string; id: string; meta?: string }[];
-  marker?: string;
   title: string;
 }) {
   return (
     <section>
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-        <span className="text-indigo-600" aria-hidden="true">
-          {marker}
-        </span>
-        {title}
-      </h3>
+      <h3 className="text-ink text-sm font-medium">{title}</h3>
       {items.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-slate-600">{emptyText}</p>
+        <p className="text-ink-muted mt-3 text-sm leading-6">{emptyText}</p>
       ) : (
-        <ol className="mt-3 space-y-3">
+        <ol className="mt-3 space-y-2.5">
           {items.map((item) => (
-            <li className="flex items-start gap-3 text-sm" key={item.id}>
+            <li
+              className="flex items-start gap-2.5 text-sm leading-6"
+              key={item.id}
+            >
               <span
                 aria-hidden="true"
-                className="mt-2 size-1.5 shrink-0 rounded-full bg-indigo-500"
+                className="bg-brand mt-2 size-1 shrink-0 rounded-full"
               />
-              <span className="min-w-0 flex-1 leading-5 text-slate-800">
+              <span className="text-ink-soft min-w-0 flex-1">
                 {item.content}
               </span>
               {item.meta ? (
-                <span className="shrink-0 text-indigo-600">{item.meta}</span>
+                <span className="text-ink-muted shrink-0 font-mono text-[11px] tabular-nums">
+                  {item.meta}
+                </span>
               ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function ActionItemsList({ items }: { items: SummaryActionItem[] }) {
+  return (
+    <section>
+      <h3 className="text-ink text-sm font-medium">Action items</h3>
+      {items.length === 0 ? (
+        <p className="text-ink-muted mt-3 text-sm leading-6">
+          No action items recorded.
+        </p>
+      ) : (
+        <ol className="mt-3 space-y-3">
+          {items.slice(0, 4).map((item, index) => (
+            <li className="flex gap-2.5" key={`action-item-${index}`}>
+              <span
+                aria-hidden="true"
+                className="bg-success-soft text-success mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full"
+              >
+                <Icon className="size-2.5" name="check" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-ink-soft text-sm leading-5">{item.task}</p>
+                <p className="text-ink-muted mt-1 text-xs">
+                  Owner: {renderActionItemOwner(item.owner)}
+                </p>
+              </div>
             </li>
           ))}
         </ol>
@@ -614,59 +556,35 @@ export function TranscriptPanel({
   }
 
   return (
-    <article
-      className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm shadow-slate-100 sm:p-5"
-      id="transcript"
-    >
-      <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap gap-3">
-          <button
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            type="button"
-          >
-            Speakers
-            <span aria-hidden="true">⌄</span>
-          </button>
-          <button
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            type="button"
-          >
-            Topics
-            <span aria-hidden="true">⌄</span>
-          </button>
-        </div>
-        <div className="flex min-w-0 gap-3">
-          <div
-            aria-label="Search transcript"
-            className="flex h-10 min-w-0 flex-1 items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-400 md:w-64"
-            role="search"
-          >
-            Search transcript...
-          </div>
-          <button
-            aria-label="Transcript filters"
-            className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50"
-            type="button"
-          >
-            ≡
-          </button>
-        </div>
-      </div>
+    <article className={cardClass} id="transcript">
+      <header className="flex flex-wrap items-center gap-3">
+        <h2 className="font-display text-ink text-2xl font-medium tracking-tight">
+          Transcript
+        </h2>
+        <span
+          aria-hidden="true"
+          className="bg-hairline hidden h-px flex-1 sm:block"
+        />
+        {segments.length > 0 ? (
+          <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase tabular-nums">
+            {segments.length} segment{segments.length === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </header>
 
-      <h2 className="sr-only">Transcript</h2>
       {segments.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-slate-600">{emptyMessage}</p>
+        <EmptyState>{emptyMessage}</EmptyState>
       ) : (
-        <ol className="mt-4 max-h-[34rem] space-y-5 overflow-y-auto pr-1">
+        <ol className="mt-6 max-h-[40rem] space-y-6 overflow-y-auto pr-1">
           {segments.map((segment) => (
             <li className="flex gap-4" key={segment.id}>
               <SpeakerAvatar label={segment.speakerLabel} />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <p className="font-semibold text-slate-950">
+                  <p className="text-ink text-sm font-medium">
                     {formatSpeakerLabel(segment.speakerLabel)}
                   </p>
-                  <time className="text-sm font-medium text-indigo-600">
+                  <time className="bg-canvas text-ink-muted rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums">
                     <span className="sr-only">
                       [{formatTranscriptTimestamp(segment.startSeconds)}]{" "}
                       {segment.speakerLabel}
@@ -676,24 +594,176 @@ export function TranscriptPanel({
                     </span>
                   </time>
                 </div>
-                <p className="mt-1 text-sm leading-6 text-slate-800">
+                <p className="text-ink-soft mt-1.5 text-sm leading-[1.7]">
                   {segment.text}
                 </p>
               </div>
-              <button
-                aria-label={`Actions for ${segment.speakerLabel} at ${formatTranscriptTimestamp(
-                  segment.startSeconds,
-                )}`}
-                className="hidden size-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-700 sm:inline-flex"
-                type="button"
-              >
-                ⋮
-              </button>
             </li>
           ))}
         </ol>
       )}
     </article>
+  );
+}
+
+const PIPELINE_STAGES: Array<{
+  description: string;
+  id: MeetingStatus;
+  label: string;
+}> = [
+  {
+    description: "Preparing audio file",
+    id: "normalizing",
+    label: "Normalize audio",
+  },
+  {
+    description: "Generating transcript",
+    id: "transcribing",
+    label: "Transcribe",
+  },
+  {
+    description: "Clustering voices",
+    id: "diarizing",
+    label: "Identify speakers",
+  },
+  {
+    description: "Extracting key moments",
+    id: "summarizing",
+    label: "Summarize",
+  },
+];
+
+type StageState = "complete" | "active" | "pending" | "failed";
+
+function ProcessingPanel({
+  failedAtStage,
+  progress,
+  status,
+}: {
+  failedAtStage: MeetingStatus | null;
+  progress: number | null;
+  status: MeetingStatus;
+}) {
+  const stageState = (index: number): StageState => {
+    if (status === "done") {
+      return "complete";
+    }
+
+    if (status === "error") {
+      const failedIndex = failedAtStage
+        ? PIPELINE_STAGES.findIndex((stage) => stage.id === failedAtStage)
+        : -1;
+
+      if (failedIndex >= 0) {
+        if (index < failedIndex) return "complete";
+        if (index === failedIndex) return "failed";
+        return "pending";
+      }
+
+      return index === 0 ? "failed" : "pending";
+    }
+
+    if (status === "pending") {
+      return "pending";
+    }
+
+    const currentIndex = PIPELINE_STAGES.findIndex(
+      (stage) => stage.id === status,
+    );
+
+    if (currentIndex < 0) return "pending";
+    if (index < currentIndex) return "complete";
+    if (index === currentIndex) return "active";
+    return "pending";
+  };
+
+  return (
+    <aside className={railCardClass}>
+      <header className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-ink text-lg font-medium tracking-tight">
+          Processing
+        </h2>
+        {status === "transcribing" && progress !== null ? (
+          <span className="text-brand font-mono text-[11px] tabular-nums">
+            {progress}%
+          </span>
+        ) : status === "pending" ? (
+          <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase">
+            Queued
+          </span>
+        ) : null}
+      </header>
+      <ol className="before:bg-hairline relative mt-5 space-y-4 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px">
+        {PIPELINE_STAGES.map((stage, index) => {
+          const state = stageState(index);
+
+          return (
+            <li
+              className="relative grid grid-cols-[auto_1fr] items-start gap-x-3"
+              key={stage.id}
+            >
+              <StageIndicator state={state} />
+              <div className="min-w-0">
+                <p
+                  className={`text-sm font-medium ${
+                    state === "active"
+                      ? "text-brand"
+                      : state === "failed"
+                        ? "text-danger"
+                        : state === "complete"
+                          ? "text-ink"
+                          : "text-ink-muted"
+                  }`}
+                >
+                  {stage.label}
+                </p>
+                {state === "active" || state === "failed" ? (
+                  <p className="text-ink-muted mt-0.5 text-xs">
+                    {stage.description}
+                  </p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
+  );
+}
+
+function StageIndicator({ state }: { state: StageState }) {
+  if (state === "complete") {
+    return (
+      <span className="bg-success text-canvas ring-surface relative z-[1] flex size-4 shrink-0 items-center justify-center rounded-full ring-4">
+        <Icon className="size-2.5" name="check" />
+      </span>
+    );
+  }
+
+  if (state === "active") {
+    return (
+      <span
+        aria-hidden="true"
+        className="bg-brand-soft ring-surface relative z-[1] flex size-4 shrink-0 items-center justify-center rounded-full ring-4"
+      >
+        <span className="bg-brand size-2 animate-pulse rounded-full" />
+      </span>
+    );
+  }
+
+  if (state === "failed") {
+    return (
+      <span className="bg-danger text-canvas ring-surface relative z-[1] flex size-4 shrink-0 items-center justify-center rounded-full ring-4">
+        <Icon className="size-2.5" name="alert" />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className="border-hairline-strong bg-surface ring-surface relative z-[1] size-4 shrink-0 rounded-full border ring-4"
+    />
   );
 }
 
@@ -710,29 +780,29 @@ function SpeakersPanel({
       : [{ durationSeconds: 0, label: "Speaker 1", percentage: 100 }];
 
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm shadow-slate-100">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-950">Speakers</h2>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          type="button"
-        >
-          <span aria-hidden="true">+</span>
-          Add speaker
-        </button>
-      </div>
-      <ol className="mt-5 space-y-4">
+    <aside className={railCardClass}>
+      <header className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-ink text-lg font-medium tracking-tight">
+          Speakers
+        </h2>
+        <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase tabular-nums">
+          {visibleSpeakers.length}
+        </span>
+      </header>
+      <ol className="mt-5 space-y-3.5">
         {visibleSpeakers.slice(0, 6).map((speaker) => (
           <li
             className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-3 text-sm"
             key={speaker.label}
           >
             <SpeakerAvatar label={speaker.label} />
-            <span className="min-w-0 truncate font-medium text-slate-950">
+            <span className="text-ink min-w-0 truncate font-medium">
               {formatSpeakerLabel(speaker.label)}
             </span>
-            <span className="text-slate-500">{speaker.percentage}%</span>
-            <span className="hidden w-16 text-right text-slate-500 sm:inline">
+            <span className="text-ink-muted font-mono text-xs tabular-nums">
+              {speaker.percentage}%
+            </span>
+            <span className="text-ink-muted hidden w-14 text-right font-mono text-xs tabular-nums sm:inline">
               {durationSeconds === null
                 ? "—"
                 : formatDuration(Math.max(0, speaker.durationSeconds))}
@@ -745,50 +815,57 @@ function SpeakersPanel({
 }
 
 function HighlightsPanel({ topics }: { topics: TopicItem[] }) {
-  const visibleTopics =
-    topics.length > 0
-      ? topics.slice(0, 3)
-      : [
-          {
-            label: "Highlights will appear after summarization.",
-            timestamp: "—",
-          },
-        ];
+  if (topics.length === 0) {
+    return (
+      <aside className={railCardClass}>
+        <header className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-ink text-lg font-medium tracking-tight">
+            Key moments
+          </h2>
+        </header>
+        <p className="text-ink-muted mt-4 text-sm leading-6">
+          Highlights appear once summarization completes.
+        </p>
+      </aside>
+    );
+  }
+
+  const dotColors = ["bg-brand", "bg-accent", "bg-warning", "bg-success"];
 
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm shadow-slate-100">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-950">Highlights</h2>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          type="button"
-        >
-          <span aria-hidden="true">+</span>
-          Add highlight
-        </button>
-      </div>
-      <ol className="mt-5 space-y-5">
-        {visibleTopics.map((topic, index) => (
-          <li className="grid grid-cols-[auto_1fr] gap-x-4" key={topic.label}>
+    <aside className={railCardClass}>
+      <header className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-ink text-lg font-medium tracking-tight">
+          Key moments
+        </h2>
+        <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase tabular-nums">
+          {topics.length}
+        </span>
+      </header>
+      <ol className="before:bg-hairline-strong relative mt-5 space-y-5 before:absolute before:top-3 before:bottom-3 before:left-[5px] before:w-px">
+        {topics.slice(0, 4).map((topic, index) => (
+          <li
+            className="relative grid grid-cols-[auto_1fr] items-start gap-x-4"
+            key={topic.label}
+          >
             <span
-              className={`mt-1 size-2.5 rounded-full ${
-                index === 0
-                  ? "bg-indigo-600"
-                  : index === 1
-                    ? "bg-emerald-500"
-                    : "bg-orange-500"
+              aria-hidden="true"
+              className={`ring-surface relative z-[1] mt-1.5 size-2.5 rounded-full ring-4 ${
+                dotColors[index % dotColors.length]
               }`}
             />
             <div className="min-w-0">
-              <div className="flex items-baseline gap-4">
-                <time className="text-sm font-medium text-indigo-600">
+              <div className="flex flex-wrap items-baseline gap-x-3">
+                <time className="text-ink-muted font-mono text-[11px] tabular-nums">
                   {topic.timestamp}
                 </time>
-                <h3 className="font-semibold text-slate-950">{topic.label}</h3>
+                <h3 className="text-ink text-sm font-medium">{topic.label}</h3>
               </div>
-              <p className="mt-1 text-sm leading-6 text-slate-600">
-                {topic.description ?? "Captured from the meeting summary."}
-              </p>
+              {topic.description ? (
+                <p className="text-ink-muted mt-1 text-xs leading-5">
+                  {topic.description}
+                </p>
+              ) : null}
             </div>
           </li>
         ))}
@@ -797,57 +874,151 @@ function HighlightsPanel({ topics }: { topics: TopicItem[] }) {
   );
 }
 
-function NotesPanel({
-  summary,
-  uploadedLabel,
+function DangerZone({
+  actionData,
+  isDeleting,
+  isUpdatingTitle,
 }: {
-  summary: MeetingSummary | null;
-  uploadedLabel: string;
+  actionData: MeetingActionData | undefined;
+  isDeleting: boolean;
+  isUpdatingTitle: boolean;
 }) {
+  const error =
+    actionData?.ok === false && actionData.intent === "delete-meeting"
+      ? actionData.error
+      : null;
+
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm shadow-slate-100">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-950">Notes</h2>
-        <button
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          type="button"
+    <section className={cardClass}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-ink text-base font-medium">
+            Delete this meeting
+          </h2>
+          <p className="text-ink-muted mt-1 text-sm leading-6">
+            Removes the meeting record and stored audio artifacts. This cannot
+            be undone.
+          </p>
+          {error ? (
+            <p className="text-danger mt-3 text-sm font-medium">{error}</p>
+          ) : null}
+        </div>
+        <Form
+          method="post"
+          onSubmit={(event) => {
+            if (
+              !window.confirm(
+                "Delete this meeting and its stored audio artifacts? This cannot be undone.",
+              )
+            ) {
+              event.preventDefault();
+            }
+          }}
         >
-          <span aria-hidden="true">+</span>
-          Add note
-        </button>
+          <input name="_intent" type="hidden" value="delete-meeting" />
+          <button
+            className="border-danger/30 text-danger hover:border-danger hover:bg-danger hover:text-canvas inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium whitespace-nowrap transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isDeleting || isUpdatingTitle}
+            type="submit"
+          >
+            <Icon className="size-4" name="trash" />
+            {isDeleting ? "Deleting…" : "Delete meeting"}
+          </button>
+        </Form>
       </div>
-      <p className="mt-4 text-sm leading-6 text-slate-700">
-        {summary?.openQuestions[0]?.text ??
-          summary?.decisions[0]?.text ??
-          "Notes can be added once the meeting has been reviewed."}
-      </p>
-      <p className="mt-4 text-xs text-slate-500">
-        Created by you · {uploadedLabel}
-      </p>
-    </aside>
+    </section>
   );
 }
 
-function PipelinePanel({
-  duration,
-  presentationLabel,
-  uploadedLabel,
-}: {
-  duration: string;
-  presentationLabel: string;
-  uploadedLabel: string;
-}) {
+function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm shadow-slate-100">
-      <h2 className="text-base font-semibold text-slate-950">
-        Meeting details
-      </h2>
-      <dl className="mt-4 grid gap-4 text-sm">
-        <DetailField label="Status" value={presentationLabel} />
-        <DetailField label="Duration" value={duration} />
-        <DetailField label="Uploaded" value={uploadedLabel} />
+    <div className="border-danger/25 bg-danger-soft/40 rounded-2xl border p-6 sm:p-8">
+      <div className="flex items-start gap-3">
+        <span className="bg-danger text-canvas mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full">
+          <Icon className="size-4" name="alert" />
+        </span>
+        <div>
+          <h2 className="font-display text-danger text-xl font-medium tracking-tight">
+            Processing failed
+          </h2>
+          <p className="text-ink-soft mt-1 text-sm">
+            The pipeline could not complete. Diagnostic details below.
+          </p>
+        </div>
+      </div>
+      <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+        <DetailField
+          label="Error kind"
+          value={meeting.errorKind ?? "Unknown"}
+        />
+        <DetailField
+          label="Failed at stage"
+          value={meeting.failedAtStage ?? "Unknown"}
+        />
+        <div className="sm:col-span-2">
+          <dt className="text-ink-muted font-mono text-[11px] tracking-[0.08em] uppercase">
+            Error message
+          </dt>
+          <dd className="border-danger/15 bg-canvas text-ink-soft mt-2 rounded-lg border p-3 font-mono text-xs leading-relaxed">
+            {meeting.errorMessage ?? "No error message was recorded."}
+          </dd>
+        </div>
       </dl>
-    </aside>
+    </div>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-ink-muted font-mono text-[11px] tracking-[0.08em] uppercase">
+        {label}
+      </dt>
+      <dd className="text-ink mt-1 text-sm font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function StatusBadge({
+  progress,
+  status,
+}: {
+  progress: number | null;
+  status: MeetingStatus;
+}) {
+  const presentation = getMeetingStatusPresentation({
+    status,
+    transcriptionProgress: progress,
+  });
+  const toneStyles: Record<MeetingStatusTone, string> = {
+    active: "border-brand/20 bg-brand-soft text-brand",
+    danger: "border-danger/25 bg-danger-soft text-danger",
+    queued: "border-hairline bg-surface-sunken text-ink-soft",
+    success: "border-success/25 bg-success-soft text-success",
+  };
+
+  return (
+    <span
+      className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-[0.06em] uppercase ${toneStyles[presentation.tone]}`}
+    >
+      <span
+        aria-hidden="true"
+        className={`size-1.5 rounded-full ${
+          presentation.tone === "active"
+            ? "bg-brand animate-pulse"
+            : "bg-current"
+        }`}
+      />
+      {presentation.label}
+    </span>
+  );
+}
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-hairline-strong bg-canvas/50 mt-6 rounded-xl border border-dashed px-5 py-8 text-center">
+      <p className="text-ink-muted text-sm leading-6">{children}</p>
+    </div>
   );
 }
 
@@ -857,7 +1028,7 @@ function SpeakerAvatar({ label }: { label: string }) {
 
   return (
     <span
-      className={`flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${speakerAvatarClasses[colorIndex]}`}
+      className={`flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-medium ${speakerAvatarClasses[colorIndex]}`}
     >
       {initial}
     </span>
@@ -877,12 +1048,12 @@ type TopicItem = {
 };
 
 const speakerAvatarClasses = [
-  "bg-indigo-600",
-  "bg-emerald-600",
-  "bg-orange-500",
-  "bg-blue-500",
-  "bg-pink-500",
-  "bg-cyan-600",
+  "bg-brand-soft text-brand",
+  "bg-success-soft text-success",
+  "bg-accent-soft text-accent-deep",
+  "bg-warning-soft text-warning",
+  "bg-[#e3dde9] text-[#5e4a73]",
+  "bg-[#dbdfe6] text-[#3b4860]",
 ] as const;
 
 function getSpeakerStats(segments: TranscriptSegment[]) {
@@ -969,84 +1140,6 @@ function hashString(value: string) {
   }
 
   return hash;
-}
-
-function DetailField({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs font-semibold text-slate-500 uppercase">
-        {label}
-      </dt>
-      <dd className="mt-1 text-sm font-medium text-slate-800">{value}</dd>
-    </div>
-  );
-}
-
-function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
-  return (
-    <div className="rounded-lg border border-orange-200 bg-orange-50 p-5">
-      <h2 className="text-lg font-semibold text-orange-900">
-        Processing failed
-      </h2>
-      <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
-        <DetailField
-          label="Error kind"
-          value={meeting.errorKind ?? "Unknown"}
-        />
-        <DetailField
-          label="Failed at stage"
-          value={meeting.failedAtStage ?? "Unknown"}
-        />
-        <div className="sm:col-span-2">
-          <dt className="text-xs font-semibold tracking-[0.2em] text-orange-700 uppercase">
-            Error message
-          </dt>
-          <dd className="mt-2 text-orange-900">
-            {meeting.errorMessage ?? "No error message was recorded."}
-          </dd>
-        </div>
-      </dl>
-    </div>
-  );
-}
-
-function StatusBadge({
-  progress,
-  status,
-}: {
-  progress: number | null;
-  status: MeetingStatus;
-}) {
-  const presentation = getMeetingStatusPresentation({
-    status,
-    transcriptionProgress: progress,
-  });
-  const toneStyles: Record<MeetingStatusTone, string> = {
-    active: "border-indigo-200 bg-indigo-50 text-indigo-800",
-    danger: "border-orange-200 bg-orange-50 text-orange-800",
-    queued: "border-slate-200 bg-slate-100 text-slate-700",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  };
-
-  return (
-    <span
-      className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold ${toneStyles[presentation.tone]}`}
-    >
-      {presentation.label}
-    </span>
-  );
-}
-
-function formatUploadedAt(createdAt: string) {
-  return new Intl.DateTimeFormat("en", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-    timeZone: "UTC",
-    timeZoneName: "short",
-    year: "numeric",
-  }).format(new Date(createdAt));
 }
 
 function formatMeetingDate(createdAt: string) {

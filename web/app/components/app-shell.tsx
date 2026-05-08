@@ -92,7 +92,7 @@ export function AppShell() {
   return (
     <AppShellChromeContext.Provider value={contextValue}>
       <main
-        className="min-h-screen bg-white text-[#151936]"
+        className="bg-canvas text-ink min-h-screen"
         onDragEnter={dropZone?.onDragEnter}
         onDragLeave={dropZone?.onDragLeave}
         onDragOver={dropZone?.onDragOver}
@@ -132,10 +132,15 @@ function DesktopSidebar({
   storage: AppShellStorageSummary;
 }) {
   return (
-    <aside className="hidden w-[258px] shrink-0 border-r border-[#edf0f7] bg-white px-6 py-8 lg:flex lg:flex-col">
-      <Link className="flex items-center gap-3 text-lg font-semibold" to="/">
+    <aside className="border-hairline bg-canvas hidden w-[258px] shrink-0 border-r px-6 py-8 lg:flex lg:flex-col">
+      <Link
+        className="text-ink flex items-center gap-3 text-lg font-medium tracking-tight"
+        to="/"
+      >
         <LogoMark />
-        <span>Slusko</span>
+        <span className="font-display text-[1.35rem] tracking-tight">
+          Sluško
+        </span>
       </Link>
       <PrimaryAction action={primaryAction} className="mt-10 h-12 gap-3" />
       <SidebarNav />
@@ -153,10 +158,12 @@ function MobileHeader({
   primaryAction: AppShellPrimaryAction;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-4 pt-5 sm:px-6 md:px-8 lg:hidden">
-      <Link className="flex min-w-0 items-center gap-3 font-semibold" to="/">
+    <div className="border-hairline bg-canvas flex items-center justify-between gap-3 border-b px-4 pt-5 pb-4 sm:px-6 md:px-8 lg:hidden">
+      <Link className="flex min-w-0 items-center gap-3 font-medium" to="/">
         <LogoMark />
-        <span className="truncate">Slusko</span>
+        <span className="font-display truncate text-xl tracking-tight">
+          Sluško
+        </span>
       </Link>
       <PrimaryAction action={primaryAction} iconOnly />
     </div>
@@ -167,7 +174,7 @@ function SidebarNav() {
   const location = useLocation();
 
   return (
-    <nav className="mt-9 space-y-2 text-sm font-medium text-[#151936]">
+    <nav className="text-ink mt-9 space-y-1 text-sm font-medium">
       {navItems.map((item) => {
         const isActive =
           item.label === "Home"
@@ -179,7 +186,7 @@ function SidebarNav() {
         if (item.disabled) {
           return (
             <div
-              className="flex items-center gap-3 rounded-lg px-3 py-3 text-[#66718c]"
+              className="text-ink-subtle flex items-center gap-3 rounded-lg px-3 py-2.5"
               key={item.label}
             >
               <Icon name={item.icon} className="size-5" />
@@ -190,15 +197,17 @@ function SidebarNav() {
 
         return (
           <Link
-            className={`flex items-center gap-3 rounded-lg px-3 py-3 transition ${
-              isActive ? "bg-[#f2f0ff] text-[#5947f5]" : "hover:bg-[#fafbff]"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition ${
+              isActive
+                ? "bg-brand-soft text-brand"
+                : "text-ink-soft hover:bg-surface-sunken/60"
             }`}
             key={item.label}
             to={item.to}
           >
             <Icon
               name={item.icon}
-              className={`size-5 ${isActive ? "" : "text-[#66718c]"}`}
+              className={`size-5 ${isActive ? "" : "text-ink-muted"}`}
             />
             {item.label}
           </Link>
@@ -218,8 +227,8 @@ function PrimaryAction({
   iconOnly?: boolean;
 }) {
   const sharedClassName = iconOnly
-    ? "inline-flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#5947f5] text-white shadow-[0_12px_24px_rgba(89,71,245,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
-    : `inline-flex items-center justify-center rounded-lg bg-[#5947f5] px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(89,71,245,0.22)] transition hover:bg-[#4938dc] disabled:cursor-not-allowed disabled:opacity-60 ${className}`;
+    ? "inline-flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-canvas shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition hover:bg-brand-deep active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+    : `inline-flex items-center justify-center rounded-lg bg-brand px-4 text-sm font-medium text-canvas shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition hover:bg-brand-deep active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 ${className}`;
   const label = action.ariaLabel ?? action.label;
 
   if (action.kind === "link") {
@@ -249,17 +258,17 @@ function StorageCard({ storage }: { storage: AppShellStorageSummary }) {
   const clampedPercentage = Math.max(0, Math.min(100, storage.percentage));
 
   return (
-    <div className="rounded-lg border border-[#edf0f7] p-4 shadow-[0_10px_25px_rgba(17,24,39,0.03)]">
-      <div className="flex items-center justify-between text-sm font-medium">
+    <div className="border-hairline bg-surface/60 rounded-xl border p-4">
+      <div className="text-ink flex items-center justify-between text-sm font-medium">
         <span>Storage</span>
-        <span className="text-xs text-[#697391]">
+        <span className="text-ink-muted font-mono text-xs tabular-nums">
           {storage.percentageLabel}
         </span>
       </div>
-      <p className="mt-2 text-xs text-[#697391]">{storage.description}</p>
-      <div className="mt-4 h-1.5 rounded-full bg-[#edf0f7]">
+      <p className="text-ink-muted mt-2 text-xs">{storage.description}</p>
+      <div className="bg-hairline mt-4 h-[3px] overflow-hidden rounded-full">
         <div
-          className="h-full rounded-full bg-[#5947f5]"
+          className="bg-brand h-full rounded-full"
           style={{ width: `${clampedPercentage}%` }}
         />
       </div>
@@ -269,16 +278,16 @@ function StorageCard({ storage }: { storage: AppShellStorageSummary }) {
 
 function UserCard() {
   return (
-    <div className="mt-7 border-t border-[#edf0f7] pt-6">
+    <div className="border-hairline mt-6 border-t pt-6">
       <div className="flex items-center gap-3">
-        <div className="flex size-11 items-center justify-center rounded-full bg-[#edf0f7] text-sm font-semibold text-[#151936]">
+        <div className="bg-brand-soft text-brand flex size-10 items-center justify-center rounded-full text-sm font-medium">
           AA
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">Atila</p>
-          <p className="text-xs text-[#697391]">Admin</p>
+          <p className="text-ink truncate text-sm font-medium">Atila</p>
+          <p className="text-ink-muted text-xs">Admin</p>
         </div>
-        <Icon name="chevron-down" className="ml-auto size-4 text-[#66718c]" />
+        <Icon name="chevron-down" className="text-ink-muted ml-auto size-4" />
       </div>
     </div>
   );
