@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from slusko_worker.config import WorkerConfig
-from slusko_worker.main import WORKER_SINGLETON_LOCK_ID, worker_singleton_lock
+from slusko_worker.main import WORKER_SINGLETON_LOCK_ID, run, worker_singleton_lock
 
 
 class FakeCursor:
@@ -85,3 +85,79 @@ def test_worker_singleton_lock_rejects_second_worker_and_closes_connection(
         "commit",
         "close",
     ]
+
+
+def test_run_surfaces_aggregate_startup_validation_including_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("slusko_worker.main.configure_logging", lambda: None)
+    monkeypatch.setattr("slusko_worker.main.signal.signal", lambda *_args: None)
+
+    def fake_load_config() -> WorkerConfig:
+        return WorkerConfig(
+            database_url="",
+            huggingface_token="",
+            whisper_model="",
+            pyannote_model="",
+            openrouter_api_key="",
+            openrouter_model="",
+            model_cache_dir="",
+            hf_home="",
+        )
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("should not be called before startup validation passes")
+
+    monkeypatch.setattr("slusko_worker.main.load_config", fake_load_config)
+    monkeypatch.setattr("slusko_worker.main.check_database", fail_if_called)
+    monkeypatch.setattr(
+        "slusko_worker.main.PostgresMeetingQueue.from_database_url", fail_if_called
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        run()
+
+    message = str(exc.value)
+    assert "Worker startup config is invalid" in message
+    assert "DATABASE_URL" in message
+    assert "OPENROUTER_API_KEY" in message
+
+
+def test_run_validates_startup_config_before_database_or_queue_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr("slusko_worker.main.configure_logging", lambda: None)
+    monkeypatch.setattr("slusko_worker.main.signal.signal", lambda *_args: None)
+
+    config = WorkerConfig(database_url="postgres://example")
+
+    def fake_load_config() -> WorkerConfig:
+        calls.append("load_config")
+        return config
+
+    def fake_apply_hf_home_default(_config: WorkerConfig) -> None:
+        calls.append("apply_hf_home_default")
+
+    def fake_validate_startup_config(_config: WorkerConfig) -> None:
+        calls.append("validate_startup_config")
+        raise RuntimeError("missing required startup config")
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("should not be called before startup validation passes")
+
+    monkeypatch.setattr("slusko_worker.main.load_config", fake_load_config)
+    monkeypatch.setattr("slusko_worker.main.apply_hf_home_default", fake_apply_hf_home_default)
+    monkeypatch.setattr(
+        "slusko_worker.main.validate_startup_config", fake_validate_startup_config
+    )
+    monkeypatch.setattr("slusko_worker.main.check_database", fail_if_called)
+    monkeypatch.setattr(
+        "slusko_worker.main.PostgresMeetingQueue.from_database_url", fail_if_called
+    )
+
+    with pytest.raises(RuntimeError, match="missing required startup config"):
+        run()
+
+    assert calls == ["load_config", "apply_hf_home_default", "validate_startup_config"]

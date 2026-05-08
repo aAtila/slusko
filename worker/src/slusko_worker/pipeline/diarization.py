@@ -82,6 +82,9 @@ class PyannoteDiarizer:
 
         return assign_speakers(transcript_segments, diarization_segments)
 
+    def preload_pipeline(self) -> None:
+        self._load_pipeline()
+
     def _load_pipeline(self) -> PyannotePipelineLike:
         if self._pipeline is None:
             if not self._hf_token:

@@ -1,13 +1,37 @@
 # Slusko
 
-Compose-first local stack for Slusko (`postgres`, `web`, `worker`).
+Compose-first self-hosted stack for Slusko (`postgres`, `web`, `worker`).
+
+## v1 access boundary (important)
+
+Slusko v1 is intended for VPN-only/self-hosted environments.
+
+- There is no in-app auth in v1.
+- Do **not** expose this stack publicly on the internet until dedicated auth work lands in a future issue.
 
 ## Prerequisites
 
 - Docker + Docker Compose v2
 - Bun 1.3.9 (for local `web/` commands outside containers)
 
-## Start the stack
+## Required worker environment
+
+The worker now validates required startup config before queue processing. Required values:
+
+- `DATABASE_URL`
+- `HF_TOKEN` **or** `HUGGINGFACE_TOKEN`
+- `WHISPER_MODEL`
+- `PYANNOTE_MODEL`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`
+- `MODEL_CACHE_DIR`
+- `HF_HOME`
+
+`OPENROUTER_BASE_URL` and `OPENROUTER_TIMEOUT_SECONDS` are optional overrides.
+
+Use `.env.example` as the baseline.
+
+## Start the local stack
 
 From repo root:
 
@@ -15,10 +39,10 @@ From repo root:
 # 1) Start database
 docker compose up -d postgres
 
-# 2) Apply Drizzle migrations from the web service image
+# 2) Apply Drizzle migrations
 docker compose run --rm web bun run db:migrate
 
-# Optional: add sample local-development meetings
+# Optional: add sample meetings
 docker compose run --rm web bun run db:seed
 
 # 3) Start app services
@@ -27,88 +51,56 @@ docker compose up web worker
 
 Web app: http://localhost:5173
 
-## Production deployment with Compose/Coolify
+## Model preload command (recommended)
 
-Use `docker-compose.prod.yml` for production-style deployments. Unlike the local-dev `docker-compose.yml`, it builds the web `production` target, does not bind-mount `./web`, and lets `web/Dockerfile` run `bun run start`.
+To preload Whisper + pyannote into the persistent model cache **outside** meeting processing:
 
-Production Postgres is a standalone Coolify-managed Database resource (sibling to the app stack on the same Coolify host), reached over Coolify's internal Docker network.
+```bash
+docker compose run --rm worker slusko-worker-preload-models
+```
 
-Required production environment variables:
+This command uses the same startup validation as the normal worker process. If you skip preload, the first real meeting processing run may lazily download models into the same persistent cache volume.
 
-- `DATABASE_URL` (set this manually in Coolify app environment config as the single source of truth)
-- `HF_TOKEN` if diarization needs Hugging Face access
+## Named volumes and persistence
 
-Deploy flow in Coolify:
+- `slusko_meetings`: uploaded originals + normalized audio artifacts.
+- `slusko_models`: model weights/cache used by Whisper + pyannote.
 
-1. Configure the Coolify pre-deployment command to run `bun run db:migrate` in the web app/migration environment with the same manually configured `DATABASE_URL`.
-2. Keep `docker-compose.prod.yml` as the app stack definition for `web` and `worker`.
-
-If migrations fail, Coolify aborts the rollout before new `web`/`worker` containers are exposed.
-
-The `migrate` service in `docker-compose.prod.yml` remains available as a manual escape hatch for ad-hoc migration operations, but it is not the normal deploy path.
-
-## Stop the stack
+Stop normally with:
 
 ```bash
 docker compose down
 ```
 
-Do **not** run `docker compose down -v` unless you intentionally want to delete named volumes: uploaded meetings (`slusko_meetings`) and model cache (`slusko_models`).
+⚠️ `docker compose down -v` deletes **both** `slusko_meetings` and `slusko_models`.
 
-## Worker runtime notes (issue #7 slice)
+## Production deployment with Compose/Coolify
 
-- The worker image installs `ffmpeg`, which also provides `ffprobe` required by normalization.
-- Compose sets worker runtime paths explicitly:
-  - `MEETINGS_DIR=/data/meetings`
-  - `MODEL_CACHE_DIR=/data/models`
-  - `HF_HOME=/data/models`
-- This is a normalization-only vertical slice: worker marks meetings `done` after successful normalization + duration capture; downstream transcription/diarization/summarization are future work.
+Use `docker-compose.prod.yml` for production-style deployments. It builds the web `production` target, avoids bind-mounting `./web`, and runs the production web server.
 
-## Issue #7 acceptance QA
+Production Postgres is a standalone Coolify-managed database resource (same host/network scope).
 
-Use a disposable local/dev database or back up anything you need before forcing failures.
+Required production env:
 
-### Happy path: upload to normalized audio
+- `DATABASE_URL`
+- `HF_TOKEN` or `HUGGINGFACE_TOKEN`
+- `WHISPER_MODEL`
+- `PYANNOTE_MODEL`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`
+- `MODEL_CACHE_DIR` (defaults to `/data/models` in compose)
+- `HF_HOME` (defaults to `/data/models` in compose)
 
-1. Start Postgres and apply migrations:
+Optional:
 
-   ```bash
-   docker compose up -d postgres
-   docker compose run --rm web bun run db:migrate
-   ```
+- `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`)
+- `OPENROUTER_TIMEOUT_SECONDS` (default `120`)
 
-2. Start the app services:
+Deploy flow in Coolify:
 
-   ```bash
-   docker compose up web worker
-   ```
+1. Configure pre-deploy migration command to run `bun run db:migrate` with the same `DATABASE_URL`.
+2. Keep `docker-compose.prod.yml` as the app stack definition for `web` and `worker`.
 
-3. In the web UI at http://localhost:5173, upload a small `.mp3`, `.m4a`, `.wav`, or `.mp4`.
-4. Verify the meeting appears as `pending` / “Queued”, then transitions to `normalizing` / “Normalizing audio”.
-5. After the worker finishes, verify:
-   - `/data/meetings/<meeting_uuid>/normalized.wav` exists in the shared meeting volume, for example with `docker compose exec worker test -f /data/meetings/<meeting_uuid>/normalized.wav`;
-   - the original `original.<ext>` file is removed, for example with `docker compose exec worker sh -c 'ls -la /data/meetings/<meeting_uuid>'`;
-   - `meetings.duration_seconds` is a non-null integer;
-   - `meetings.status` is `done` for this normalization-only slice;
-   - the home list stops polling and shows the duration + “Done”;
-   - `/meetings/<meeting_uuid>` shows the same duration and status.
+If migrations fail, Coolify aborts rollout before exposing new containers.
 
-### Failure behavior
-
-1. Create or upload a meeting, then force a normalization failure before the worker processes it, for example by replacing the uploaded `original.<ext>` with corrupt bytes or removing the original file from `/data/meetings/<meeting_uuid>/`.
-2. Start or let the worker drain the queue.
-3. Verify the row is terminal `error` with `error_kind`, actionable `error_message`, and `failed_at_stage='normalizing'`.
-4. Verify the home list shows the failed state and `/meetings/<meeting_uuid>` shows the failure details.
-
-### Missed notification recovery
-
-1. Stop the worker.
-2. Insert or upload a meeting so a row exists with `status='pending'` while no worker is listening.
-3. Start the worker.
-4. Verify the worker registers `LISTEN meetings_pending` before its startup scan, then processes the pending row through normalization to `done`.
-
-### Polling fallback
-
-1. Start the worker with a short fallback interval for QA, for example `QUEUE_POLL_INTERVAL_SECONDS=5`.
-2. Insert a valid pending row and matching `/data/meetings/<meeting_uuid>/original.<ext>` without sending `NOTIFY meetings_pending`.
-3. Verify the worker picks it up on the fallback poll interval and follows the same pending → normalizing → `normalized.wav` + `duration_seconds` → `done` path.
+The `migrate` service in `docker-compose.prod.yml` remains a manual escape hatch for ad-hoc migration operations.

@@ -129,6 +129,9 @@ class WhisperTranscriber:
 
         return drafts
 
+    def preload_model(self) -> None:
+        self._load_model()
+
     def _load_model(self) -> WhisperModelLike:
         if self._model is None:
             try:

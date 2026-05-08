@@ -55,11 +55,33 @@ def apply_hf_home_default(
     env.setdefault("HF_HOME", config.hf_home)
 
 
+def validate_startup_config(config: WorkerConfig) -> None:
+    missing: list[str] = []
+
+    def require(value: str | None, env_name: str) -> None:
+        if value is None or not value.strip():
+            missing.append(env_name)
+
+    require(config.database_url, "DATABASE_URL")
+    require(config.huggingface_token, "HUGGINGFACE_TOKEN or HF_TOKEN")
+    require(config.pyannote_model, "PYANNOTE_MODEL")
+    require(config.whisper_model, "WHISPER_MODEL")
+    require(config.openrouter_api_key, "OPENROUTER_API_KEY")
+    require(config.openrouter_model, "OPENROUTER_MODEL")
+    require(config.model_cache_dir, "MODEL_CACHE_DIR")
+    require(config.hf_home, "HF_HOME")
+
+    if missing:
+        raise RuntimeError(
+            "Worker startup config is invalid. Missing/blank required settings: "
+            + ", ".join(missing)
+            + ". Set required environment variables and restart the worker."
+        )
+
+
 def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
     env = environ if environ is not None else os.environ
-    database_url = env.get("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to start the worker")
+    database_url = env.get("DATABASE_URL", "")
 
     model_cache_dir = env.get("MODEL_CACHE_DIR", "/data/models")
 
@@ -72,7 +94,9 @@ def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
         whisper_device=env.get("WHISPER_DEVICE", "auto"),
         whisper_compute_type=env.get("WHISPER_COMPUTE_TYPE", "auto"),
         pyannote_model=env.get("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1"),
-        huggingface_token=env.get("HUGGINGFACE_TOKEN") or env.get("HF_TOKEN"),
+        huggingface_token=_first_non_blank(
+            env.get("HUGGINGFACE_TOKEN"), env.get("HF_TOKEN")
+        ),
         openrouter_api_key=env.get("OPENROUTER_API_KEY") or None,
         openrouter_model=env.get("OPENROUTER_MODEL") or None,
         openrouter_base_url=env.get(
@@ -94,6 +118,13 @@ def load_config(environ: dict[str, str] | None = None) -> WorkerConfig:
         tcp_keepalives_interval=int(env.get("DATABASE_TCP_KEEPALIVES_INTERVAL", "30")),
         tcp_keepalives_count=int(env.get("DATABASE_TCP_KEEPALIVES_COUNT", "5")),
     )
+
+
+def _first_non_blank(*values: str | None) -> str | None:
+    for value in values:
+        if value is not None and value.strip():
+            return value
+    return None
 
 
 def _positive_int(value: str | None, *, default: int) -> int:

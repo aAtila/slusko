@@ -11,7 +11,12 @@ from threading import Event
 
 import psycopg
 
-from slusko_worker.config import WorkerConfig, apply_hf_home_default, load_config
+from slusko_worker.config import (
+    WorkerConfig,
+    apply_hf_home_default,
+    load_config,
+    validate_startup_config,
+)
 from slusko_worker.db.models import MeetingStatus
 from slusko_worker.db.queue import PostgresMeetingQueue
 from slusko_worker.pipeline.diarization import PyannoteDiarizer
@@ -80,6 +85,7 @@ def run() -> int:
 
     config = load_config()
     apply_hf_home_default(config)
+    validate_startup_config(config)
     check_database(config)
 
     queue = PostgresMeetingQueue.from_database_url(

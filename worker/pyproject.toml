@@ -23,6 +23,7 @@ dev = [
 
 [project.scripts]
 slusko-worker = "slusko_worker.main:main"
+slusko-worker-preload-models = "slusko_worker.preload_models:main"
 
 [build-system]
 requires = ["setuptools>=69"]

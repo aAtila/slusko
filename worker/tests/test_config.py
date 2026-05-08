@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from slusko_worker.config import apply_hf_home_default, load_config
+import pytest
+
+from slusko_worker.config import (
+    WorkerConfig,
+    apply_hf_home_default,
+    load_config,
+    validate_startup_config,
+)
 
 
 def test_load_config_sets_listener_autocommit_and_tcp_keepalives() -> None:
@@ -29,6 +36,12 @@ def test_load_config_sets_listener_autocommit_and_tcp_keepalives() -> None:
     assert config.openrouter_timeout_seconds == 120.0
     assert config.transcription_progress_min_delta == 5
     assert config.transcription_progress_min_interval_seconds == 5.0
+
+
+def test_load_config_allows_missing_database_url_for_aggregate_startup_validation() -> None:
+    config = load_config({})
+
+    assert config.database_url == ""
 
 
 def test_load_config_defaults_hf_home_to_model_cache_dir() -> None:
@@ -144,6 +157,18 @@ def test_load_config_prefers_huggingface_token_over_hf_token() -> None:
     assert config.huggingface_token == "primary-token"
 
 
+def test_load_config_uses_hf_token_when_huggingface_token_is_whitespace_only() -> None:
+    config = load_config(
+        {
+            "DATABASE_URL": "postgres://example",
+            "HUGGINGFACE_TOKEN": "   \t",
+            "HF_TOKEN": "fallback-token",
+        }
+    )
+
+    assert config.huggingface_token == "fallback-token"
+
+
 def test_load_config_parses_openrouter_settings() -> None:
     config = load_config(
         {
@@ -170,3 +195,50 @@ def test_load_config_falls_back_for_invalid_openrouter_timeout() -> None:
     )
 
     assert config.openrouter_timeout_seconds == 120.0
+
+
+def test_validate_startup_config_accepts_required_values_with_hf_token_alias() -> None:
+    config = WorkerConfig(
+        database_url="postgres://example",
+        huggingface_token="hf-token",
+        whisper_model="large-v3",
+        pyannote_model="pyannote/speaker-diarization-3.1",
+        openrouter_api_key="openrouter-key",
+        openrouter_model="anthropic/claude-sonnet-4",
+        model_cache_dir="/data/models",
+        hf_home="/data/models",
+    )
+
+    validate_startup_config(config)
+
+
+def test_validate_startup_config_raises_aggregate_error_for_missing_and_blank_values() -> (
+    None
+):
+    config = load_config(
+        {
+            "DATABASE_URL": "   ",
+            "HUGGINGFACE_TOKEN": "",
+            "WHISPER_MODEL": " ",
+            "PYANNOTE_MODEL": "",
+            "OPENROUTER_API_KEY": "\t",
+            "OPENROUTER_MODEL": "",
+            "MODEL_CACHE_DIR": "",
+            "HF_HOME": "  ",
+        }
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        validate_startup_config(config)
+
+    message = str(exc.value)
+    assert "Worker startup config is invalid" in message
+    assert "DATABASE_URL" in message
+    assert "HUGGINGFACE_TOKEN or HF_TOKEN" in message
+    assert "WHISPER_MODEL" in message
+    assert "PYANNOTE_MODEL" in message
+    assert "OPENROUTER_API_KEY" in message
+    assert "OPENROUTER_MODEL" in message
+    assert "MODEL_CACHE_DIR" in message
+    assert "HF_HOME" in message
+    assert "Set required environment variables" in message

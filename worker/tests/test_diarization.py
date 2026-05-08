@@ -288,6 +288,26 @@ def test_pyannote_diarizer_loads_pipeline_once_and_assigns_speakers(tmp_path: Pa
     assert first == second
 
 
+def test_pyannote_diarizer_preload_pipeline_loads_once_with_configured_cache_dir() -> None:
+    pipeline = FakePipeline()
+    factory = RecordingPipelineFactory(pipeline)
+    diarizer = PyannoteDiarizer(
+        model_name="pyannote/test",
+        hf_token="hf_test",
+        model_cache_dir="/models",
+        pipeline_factory=factory,
+    )
+
+    diarizer.preload_pipeline()
+    diarizer.preload_pipeline()
+
+    assert len(factory.calls) == 1
+    assert factory.calls[0] == (
+        ("pyannote/test",),
+        {"use_auth_token": "hf_test", "cache_dir": "/models"},
+    )
+
+
 def test_pyannote_diarizer_reports_missing_token_as_config_missing(tmp_path: Path) -> None:
     diarizer = PyannoteDiarizer(
         hf_token=None,

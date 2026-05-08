@@ -232,6 +232,27 @@ def test_transcriber_wraps_lazy_segment_iteration_errors_as_transcription_failed
         )
 
 
+def test_transcriber_preload_model_loads_once_with_configured_cache_dir() -> None:
+    model = FakeModel([], FakeInfo(duration=None))
+    factory = RecordingModelFactory(model)
+    transcriber = WhisperTranscriber(
+        whisper_model="large-v3",
+        whisper_device="cpu",
+        whisper_compute_type="int8",
+        model_cache_dir="/models",
+        model_factory=factory,
+    )
+
+    transcriber.preload_model()
+    transcriber.preload_model()
+
+    assert len(factory.calls) == 1
+    assert factory.calls[0] == (
+        ("large-v3",),
+        {"device": "cpu", "compute_type": "int8", "download_root": "/models"},
+    )
+
+
 def test_transcriber_wraps_missing_audio_or_model_errors_as_transcription_failed(
     tmp_path: Path,
 ) -> None:
