@@ -92,18 +92,16 @@ export function AppShell() {
   return (
     <AppShellChromeContext.Provider value={contextValue}>
       <main
-        className="bg-canvas text-ink min-h-screen"
+        className="bg-canvas text-ink"
         onDragEnter={dropZone?.onDragEnter}
         onDragLeave={dropZone?.onDragLeave}
         onDragOver={dropZone?.onDragOver}
         onDrop={dropZone?.onDrop}
       >
-        <div className="flex min-h-screen">
-          <DesktopSidebar primaryAction={primaryAction} storage={storage} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <MobileHeader primaryAction={primaryAction} />
-            <Outlet />
-          </div>
+        <DesktopSidebar primaryAction={primaryAction} storage={storage} />
+        <div className="flex min-w-0 flex-col lg:pl-[258px]">
+          <MobileHeader primaryAction={primaryAction} />
+          <Outlet />
         </div>
       </main>
     </AppShellChromeContext.Provider>
@@ -132,7 +130,7 @@ function DesktopSidebar({
   storage: AppShellStorageSummary;
 }) {
   return (
-    <aside className="border-hairline bg-canvas hidden w-[258px] shrink-0 border-r px-6 py-8 lg:flex lg:flex-col">
+    <aside className="border-hairline bg-canvas hidden w-[258px] border-r px-6 py-8 lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
       <Link
         className="text-ink flex items-center gap-3 text-lg font-medium tracking-tight"
         to="/"
@@ -278,7 +276,7 @@ function StorageCard({ storage }: { storage: AppShellStorageSummary }) {
 
 function UserCard() {
   return (
-    <div className="border-hairline mt-6 border-t pt-6">
+    <div className="border-hairline -mx-6 mt-6 border-t px-6 pt-6">
       <div className="flex items-center gap-3">
         <div className="bg-brand-soft text-brand flex size-10 items-center justify-center rounded-full text-sm font-medium">
           AA

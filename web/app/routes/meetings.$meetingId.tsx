@@ -8,7 +8,7 @@ import {
   useNavigation,
   useRevalidator,
 } from "react-router";
-import { Icon, type IconName } from "~/components/app-icons";
+import { Icon } from "~/components/app-icons";
 import type {
   MeetingStatus,
   SummaryActionItem,
@@ -138,57 +138,66 @@ export default function MeetingDetailPage({
 
   return (
     <section className="text-ink min-w-0 flex-1">
-      <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-        <Link
-          className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 text-sm font-medium transition"
-          to="/"
-        >
-          <Icon name="chevron-left" className="size-4" />
-          Back to meetings
-        </Link>
+      <div className="border-hairline border-b">
+        <header className="mx-auto w-full max-w-[1500px] px-4 pt-5 pb-5 sm:px-6 lg:px-10 lg:pt-7 lg:pb-6">
+          <div className="text-ink-muted flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+            <Link
+              className="hover:text-ink inline-flex items-center gap-1 font-medium transition"
+              to="/"
+            >
+              <Icon name="chevron-left" className="size-3.5" />
+              Back to meetings
+            </Link>
+            <MetaSeparator />
+            <span aria-label={`Uploaded ${uploadedLabel}`}>
+              {uploadedLabel}
+            </span>
+            <MetaSeparator />
+            <span
+              aria-label={`Duration ${formattedDuration}`}
+              className="font-mono tabular-nums"
+            >
+              {formattedDuration}
+            </span>
+            <MetaSeparator />
+            <span>
+              {speakerStats.length || 1}{" "}
+              {speakerStats.length === 1 ? "speaker" : "speakers"}
+            </span>
+          </div>
 
-        <header className="border-hairline mt-6 border-b pb-8">
           {isEditingTitle ? (
-            <TitleEditor
-              draft={titleDraft}
-              feedback={titleFeedback}
-              feedbackId={titleFeedbackId}
-              isDeleting={isDeleting}
-              isUpdatingTitle={isUpdatingTitle}
-              onCancel={cancelTitleEdit}
-              onChange={setTitleDraft}
-            />
+            <div className="mt-3">
+              <TitleEditor
+                draft={titleDraft}
+                feedback={titleFeedback}
+                feedbackId={titleFeedbackId}
+                isDeleting={isDeleting}
+                isUpdatingTitle={isUpdatingTitle}
+                onCancel={cancelTitleEdit}
+                onChange={setTitleDraft}
+              />
+            </div>
           ) : (
-            <TitleDisplay
-              feedback={titleFeedback}
-              feedbackId={titleFeedbackId}
-              isDisabled={isDeleting || isUpdatingTitle}
-              onBeginEdit={beginTitleEdit}
-              progress={meeting.transcriptionProgress}
-              status={meeting.status}
-              title={meeting.title}
-            />
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <TitleDisplay
+                feedback={titleFeedback}
+                feedbackId={titleFeedbackId}
+                isDisabled={isDeleting || isUpdatingTitle}
+                onBeginEdit={beginTitleEdit}
+                title={meeting.title}
+              />
+              <StatusBadge
+                progress={meeting.transcriptionProgress}
+                status={meeting.status}
+              />
+            </div>
           )}
-
-          <dl className="mt-7 flex flex-wrap items-center gap-x-7 gap-y-3 text-sm">
-            <MetaItem icon="calendar" label="Uploaded" value={uploadedLabel} />
-            <MetaItem
-              icon="clock"
-              label="Duration"
-              mono
-              value={formattedDuration}
-            />
-            <MetaItem
-              icon="users"
-              label="Speakers"
-              value={`${speakerStats.length || 1} ${
-                speakerStats.length === 1 ? "speaker" : "speakers"
-              }`}
-            />
-          </dl>
         </header>
+      </div>
 
-        <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="px-4 pt-8 pb-6 sm:px-6 lg:px-10 lg:pb-10">
+        <div className="mx-auto grid w-full max-w-[1500px] gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
             <SummaryPanel status={meeting.status} summary={summary} />
             <TranscriptPanel
@@ -228,36 +237,29 @@ function TitleDisplay({
   feedbackId,
   isDisabled,
   onBeginEdit,
-  progress,
-  status,
   title,
 }: {
   feedback: MeetingActionData | undefined;
   feedbackId: string;
   isDisabled: boolean;
   onBeginEdit: () => void;
-  progress: number | null;
-  status: MeetingStatus;
   title: string;
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-        <h1 className="font-display text-ink min-w-0 text-[2.25rem] leading-[1.05] font-medium tracking-[-0.015em] sm:text-[2.75rem]">
+    <div className="min-w-0 space-y-1.5">
+      <div className="group flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h1 className="font-display text-ink min-w-0 text-[1.875rem] leading-[1.05] font-medium tracking-[-0.015em] sm:text-[2.25rem]">
           {title}
         </h1>
         <button
           aria-label="Edit meeting title"
-          className="text-ink-subtle hover:bg-surface-sunken hover:text-ink focus-visible:bg-surface-sunken focus-visible:text-ink inline-flex size-8 shrink-0 items-center justify-center rounded-md transition disabled:cursor-not-allowed disabled:opacity-30"
+          className="text-ink-subtle hover:bg-surface-sunken hover:text-ink-soft focus-visible:bg-surface-sunken focus-visible:text-ink-soft inline-flex size-7 shrink-0 items-center justify-center rounded-md opacity-40 transition group-focus-within:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
           disabled={isDisabled}
           onClick={onBeginEdit}
           type="button"
         >
-          <Icon className="size-4" name="pencil" />
+          <Icon className="size-3.5" name="pencil" />
         </button>
-      </div>
-      <div className="flex items-center gap-3">
-        <StatusBadge progress={progress} status={status} />
       </div>
       <TitleFeedback actionData={feedback} feedbackId={feedbackId} />
     </div>
@@ -359,25 +361,11 @@ function TitleFeedback({
   );
 }
 
-function MetaItem({
-  icon,
-  label,
-  mono,
-  value,
-}: {
-  icon: IconName;
-  label: string;
-  mono?: boolean;
-  value: string;
-}) {
+function MetaSeparator() {
   return (
-    <div className="text-ink-soft flex items-center gap-2">
-      <Icon className="text-ink-muted size-4" name={icon} />
-      <dt className="sr-only">{label}</dt>
-      <dd className={mono ? "font-mono text-[13px] tabular-nums" : ""}>
-        {value}
-      </dd>
-    </div>
+    <span aria-hidden="true" className="text-ink-subtle/70 select-none">
+      ·
+    </span>
   );
 }
 
