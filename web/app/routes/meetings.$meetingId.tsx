@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   data,
   Form,
   Link,
   redirect,
   useActionData,
+  useFetcher,
   useNavigation,
   useRevalidator,
 } from "react-router";
@@ -16,6 +17,8 @@ import type {
 } from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import {
+  applySpeakerMap,
+  createSpeakerMap,
   formatDuration,
   formatTranscriptTimestamp,
   getMeetingStatusPresentation,
@@ -23,6 +26,7 @@ import {
   type MeetingDetail,
   type MeetingStatusTone,
   type MeetingSummary,
+  type SpeakerMap,
   type TranscriptSegment,
 } from "~/lib/meetings-list";
 import type { Route } from "./+types/meetings.$meetingId";
@@ -74,12 +78,21 @@ export async function action({ params, request }: Route.ActionArgs) {
 export default function MeetingDetailPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { meeting, summary, transcriptSegments } = loaderData;
+  const { meeting, speakerMappings, summary, transcriptSegments } = loaderData;
   const actionData = useActionData<MeetingActionData>();
   const navigation = useNavigation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(meeting.title);
   const [titleFeedback, setTitleFeedback] = useState<MeetingActionData>();
+  const [speakerMap, setSpeakerMap] = useState<
+    Record<string, string | undefined>
+  >(() => ({ ...createSpeakerMap(speakerMappings) }));
+  const [persistedSpeakerMap, setPersistedSpeakerMap] = useState<
+    Record<string, string | undefined>
+  >(() => ({ ...createSpeakerMap(speakerMappings) }));
+  const [protectedSpeakerLabels, setProtectedSpeakerLabels] = useState<
+    Record<string, true | undefined>
+  >({});
   const { revalidate } = useRevalidator();
 
   useEffect(() => {
@@ -106,7 +119,36 @@ export default function MeetingDetailPage({
   const titleFeedbackId = "meeting-title-feedback";
   const uploadedLabel = formatMeetingDate(meeting.createdAt);
   const speakerStats = getSpeakerStats(transcriptSegments);
-  const keyTopics = getKeyTopics(summary, transcriptSegments);
+  const keyTopics = getKeyTopics(summary, transcriptSegments, speakerMap);
+
+  useEffect(() => {
+    const nextPersistedSpeakerMap = { ...createSpeakerMap(speakerMappings) };
+
+    setPersistedSpeakerMap((currentPersistedSpeakerMap) => {
+      const mergedPersistedSpeakerMap = { ...nextPersistedSpeakerMap };
+
+      for (const speakerLabel of Object.keys(protectedSpeakerLabels)) {
+        mergedPersistedSpeakerMap[speakerLabel] =
+          currentPersistedSpeakerMap[speakerLabel];
+      }
+
+      return mergedPersistedSpeakerMap;
+    });
+
+    setSpeakerMap((currentSpeakerMap) => {
+      const mergedSpeakerMap = { ...nextPersistedSpeakerMap };
+
+      for (const [speakerLabel, speakerName] of Object.entries(
+        currentSpeakerMap,
+      )) {
+        if (protectedSpeakerLabels[speakerLabel]) {
+          mergedSpeakerMap[speakerLabel] = speakerName;
+        }
+      }
+
+      return mergedSpeakerMap;
+    });
+  }, [protectedSpeakerLabels, speakerMappings]);
 
   useEffect(() => {
     if (actionData?.intent !== "update-title") {
@@ -136,6 +178,45 @@ export default function MeetingDetailPage({
     setIsEditingTitle(false);
   };
 
+  const updateSpeakerName = useCallback(
+    (speakerLabel: string, name: string) => {
+      setSpeakerMap((currentSpeakerMap) => ({
+        ...currentSpeakerMap,
+        [speakerLabel]: name,
+      }));
+    },
+    [],
+  );
+
+  const persistSpeakerName = useCallback(
+    (speakerLabel: string, name: string | null) => {
+      setPersistedSpeakerMap((currentSpeakerMap) => ({
+        ...currentSpeakerMap,
+        [speakerLabel]: name ?? undefined,
+      }));
+      setSpeakerMap((currentSpeakerMap) => ({
+        ...currentSpeakerMap,
+        [speakerLabel]: name ?? undefined,
+      }));
+    },
+    [],
+  );
+
+  const protectSpeakerEdit = useCallback((speakerLabel: string) => {
+    setProtectedSpeakerLabels((currentProtectedSpeakerLabels) => ({
+      ...currentProtectedSpeakerLabels,
+      [speakerLabel]: true,
+    }));
+  }, []);
+
+  const unprotectSpeakerEdit = useCallback((speakerLabel: string) => {
+    setProtectedSpeakerLabels((currentProtectedSpeakerLabels) => {
+      const nextProtectedSpeakerLabels = { ...currentProtectedSpeakerLabels };
+      delete nextProtectedSpeakerLabels[speakerLabel];
+      return nextProtectedSpeakerLabels;
+    });
+  }, []);
+
   return (
     <section className="text-ink min-w-0 flex-1">
       <div className="border-hairline border-b">
@@ -161,7 +242,7 @@ export default function MeetingDetailPage({
             </span>
             <MetaSeparator />
             <span>
-              {speakerStats.length || 1}{" "}
+              {speakerStats.length}{" "}
               {speakerStats.length === 1 ? "speaker" : "speakers"}
             </span>
           </div>
@@ -199,9 +280,14 @@ export default function MeetingDetailPage({
       <div className="px-4 pt-8 pb-6 sm:px-6 lg:px-10 lg:pb-10">
         <div className="mx-auto grid w-full max-w-[1500px] gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
-            <SummaryPanel status={meeting.status} summary={summary} />
+            <SummaryPanel
+              speakerMap={speakerMap}
+              status={meeting.status}
+              summary={summary}
+            />
             <TranscriptPanel
               segments={transcriptSegments}
+              speakerMap={speakerMap}
               status={meeting.status}
             />
             {meeting.status === "error" ? (
@@ -222,6 +308,12 @@ export default function MeetingDetailPage({
             />
             <SpeakersPanel
               durationSeconds={meeting.durationSeconds}
+              onSpeakerNameChange={updateSpeakerName}
+              onSpeakerNamePersist={persistSpeakerName}
+              onSpeakerNameProtect={protectSpeakerEdit}
+              onSpeakerNameUnprotect={unprotectSpeakerEdit}
+              persistedSpeakerMap={persistedSpeakerMap}
+              speakerMap={speakerMap}
               speakers={speakerStats}
             />
             <HighlightsPanel topics={keyTopics} />
@@ -370,9 +462,11 @@ function MetaSeparator() {
 }
 
 export function SummaryPanel({
+  speakerMap = {},
   summary,
   status,
 }: {
+  speakerMap?: SpeakerMap;
   summary: MeetingSummary | null;
   status: MeetingStatus;
 }) {
@@ -384,7 +478,7 @@ export function SummaryPanel({
     emptyMessage = "Summary is not available for this meeting.";
   }
 
-  const keyTopics = getKeyTopics(summary, []);
+  const keyTopics = getKeyTopics(summary, [], speakerMap);
 
   return (
     <article className={cardClass} id="overview">
@@ -408,7 +502,7 @@ export function SummaryPanel({
           <section>
             <h3 className="sr-only">Overview</h3>
             <p className="text-ink-soft text-base leading-7">
-              {summary.overview}
+              {applySpeakerMap(summary.overview, speakerMap)}
             </p>
           </section>
 
@@ -422,11 +516,14 @@ export function SummaryPanel({
               }))}
               title="Key topics"
             />
-            <ActionItemsList items={summary.actionItems} />
+            <ActionItemsList
+              items={summary.actionItems}
+              speakerMap={speakerMap}
+            />
             <SummaryList
               emptyText="No decisions recorded."
               items={summary.decisions.map((decision, index) => ({
-                content: decision.text,
+                content: applySpeakerMap(decision.text, speakerMap),
                 id: `decision-${index}`,
               }))}
               title="Decisions"
@@ -436,7 +533,7 @@ export function SummaryPanel({
           <SummaryList
             emptyText="No open questions recorded."
             items={summary.openQuestions.map((question, index) => ({
-              content: question.text,
+              content: applySpeakerMap(question.text, speakerMap),
               id: `open-question-${index}`,
             }))}
             title="Open questions"
@@ -488,7 +585,13 @@ function SummaryList({
   );
 }
 
-function ActionItemsList({ items }: { items: SummaryActionItem[] }) {
+function ActionItemsList({
+  items,
+  speakerMap,
+}: {
+  items: SummaryActionItem[];
+  speakerMap: SpeakerMap;
+}) {
   return (
     <section>
       <h3 className="text-ink text-sm font-medium">Action items</h3>
@@ -507,9 +610,11 @@ function ActionItemsList({ items }: { items: SummaryActionItem[] }) {
                 <Icon className="size-2.5" name="check" />
               </span>
               <div className="min-w-0">
-                <p className="text-ink-soft text-sm leading-5">{item.task}</p>
+                <p className="text-ink-soft text-sm leading-5">
+                  {applySpeakerMap(item.task, speakerMap)}
+                </p>
                 <p className="text-ink-muted mt-1 text-xs">
-                  Owner: {renderActionItemOwner(item.owner)}
+                  Owner: {renderActionItemOwner(item.owner, speakerMap)}
                 </p>
               </div>
             </li>
@@ -520,9 +625,16 @@ function ActionItemsList({ items }: { items: SummaryActionItem[] }) {
   );
 }
 
-function renderActionItemOwner(owner: SummaryActionItemOwner) {
+function renderActionItemOwner(
+  owner: SummaryActionItemOwner,
+  speakerMap: SpeakerMap,
+) {
   if (owner.kind === "unknown") {
     return "Unassigned";
+  }
+
+  if (owner.kind === "speaker") {
+    return applySpeakerMap(owner.value, speakerMap);
   }
 
   return owner.value;
@@ -530,9 +642,11 @@ function renderActionItemOwner(owner: SummaryActionItemOwner) {
 
 export function TranscriptPanel({
   segments,
+  speakerMap = {},
   status,
 }: {
   segments: TranscriptSegment[];
+  speakerMap?: SpeakerMap;
   status: MeetingStatus;
 }) {
   let emptyMessage = "Transcript will appear here when transcription finishes.";
@@ -564,30 +678,37 @@ export function TranscriptPanel({
         <EmptyState>{emptyMessage}</EmptyState>
       ) : (
         <ol className="mt-6 max-h-[40rem] space-y-6 overflow-y-auto pr-1">
-          {segments.map((segment) => (
-            <li className="flex gap-4" key={segment.id}>
-              <SpeakerAvatar label={segment.speakerLabel} />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <p className="text-ink text-sm font-medium">
-                    {formatSpeakerLabel(segment.speakerLabel)}
+          {segments.map((segment) => {
+            const speakerName = applySpeakerMap(
+              segment.speakerLabel,
+              speakerMap,
+            );
+
+            return (
+              <li className="flex gap-4" key={segment.id}>
+                <SpeakerAvatar label={segment.speakerLabel} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <p className="text-ink text-sm font-medium">
+                      {speakerName}
+                    </p>
+                    <time className="bg-canvas text-ink-muted rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums">
+                      <span className="sr-only">
+                        [{formatTranscriptTimestamp(segment.startSeconds)}]{" "}
+                        {speakerName}
+                      </span>
+                      <span aria-hidden="true">
+                        {formatTranscriptTimestamp(segment.startSeconds)}
+                      </span>
+                    </time>
+                  </div>
+                  <p className="text-ink-soft mt-1.5 text-sm leading-[1.7]">
+                    {segment.text}
                   </p>
-                  <time className="bg-canvas text-ink-muted rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums">
-                    <span className="sr-only">
-                      [{formatTranscriptTimestamp(segment.startSeconds)}]{" "}
-                      {segment.speakerLabel}
-                    </span>
-                    <span aria-hidden="true">
-                      {formatTranscriptTimestamp(segment.startSeconds)}
-                    </span>
-                  </time>
                 </div>
-                <p className="text-ink-soft mt-1.5 text-sm leading-[1.7]">
-                  {segment.text}
-                </p>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       )}
     </article>
@@ -755,50 +876,177 @@ function StageIndicator({ state }: { state: StageState }) {
   );
 }
 
-function SpeakersPanel({
+export function SpeakersPanel({
   durationSeconds,
+  onSpeakerNameChange,
+  onSpeakerNamePersist,
+  onSpeakerNameProtect,
+  onSpeakerNameUnprotect,
+  persistedSpeakerMap,
+  speakerMap,
   speakers,
 }: {
   durationSeconds: number | null;
+  onSpeakerNameChange: (speakerLabel: string, name: string) => void;
+  onSpeakerNamePersist: (speakerLabel: string, name: string | null) => void;
+  onSpeakerNameProtect: (speakerLabel: string) => void;
+  onSpeakerNameUnprotect: (speakerLabel: string) => void;
+  persistedSpeakerMap: SpeakerMap;
+  speakerMap: SpeakerMap;
   speakers: SpeakerStat[];
 }) {
-  const visibleSpeakers =
-    speakers.length > 0
-      ? speakers
-      : [{ durationSeconds: 0, label: "Speaker 1", percentage: 100 }];
-
   return (
     <aside className={railCardClass}>
       <header className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-ink text-lg font-medium tracking-tight">
-          Speakers
-        </h2>
+        <div>
+          <h2 className="font-display text-ink text-lg font-medium tracking-tight">
+            Speakers
+          </h2>
+          <p className="text-ink-muted mt-1 text-xs leading-5">
+            Map diarized labels to names. Saves on blur.
+          </p>
+        </div>
         <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase tabular-nums">
-          {visibleSpeakers.length}
+          {speakers.length}
         </span>
       </header>
-      <ol className="mt-5 space-y-3.5">
-        {visibleSpeakers.slice(0, 6).map((speaker) => (
-          <li
-            className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-3 text-sm"
-            key={speaker.label}
-          >
-            <SpeakerAvatar label={speaker.label} />
-            <span className="text-ink min-w-0 truncate font-medium">
-              {formatSpeakerLabel(speaker.label)}
-            </span>
-            <span className="text-ink-muted font-mono text-xs tabular-nums">
-              {speaker.percentage}%
-            </span>
-            <span className="text-ink-muted hidden w-14 text-right font-mono text-xs tabular-nums sm:inline">
-              {durationSeconds === null
-                ? "—"
-                : formatDuration(Math.max(0, speaker.durationSeconds))}
-            </span>
-          </li>
-        ))}
-      </ol>
+      {speakers.length === 0 ? (
+        <p className="text-ink-muted mt-4 text-sm leading-6">
+          Speakers appear after diarization creates transcript labels.
+        </p>
+      ) : (
+        <ol className="mt-5 space-y-4">
+          {speakers.map((speaker) => (
+            <SpeakerMappingRow
+              durationSeconds={durationSeconds}
+              key={speaker.label}
+              onNameChange={onSpeakerNameChange}
+              onNamePersist={onSpeakerNamePersist}
+              onNameProtect={onSpeakerNameProtect}
+              onNameUnprotect={onSpeakerNameUnprotect}
+              persistedName={persistedSpeakerMap[speaker.label] ?? ""}
+              speaker={speaker}
+              value={speakerMap[speaker.label] ?? ""}
+            />
+          ))}
+        </ol>
+      )}
     </aside>
+  );
+}
+
+function SpeakerMappingRow({
+  durationSeconds,
+  onNameChange,
+  onNamePersist,
+  onNameProtect,
+  onNameUnprotect,
+  persistedName,
+  speaker,
+  value,
+}: {
+  durationSeconds: number | null;
+  onNameChange: (speakerLabel: string, name: string) => void;
+  onNamePersist: (speakerLabel: string, name: string | null) => void;
+  onNameProtect: (speakerLabel: string) => void;
+  onNameUnprotect: (speakerLabel: string) => void;
+  persistedName: string;
+  speaker: SpeakerStat;
+  value: string;
+}) {
+  const fetcher = useFetcher<MeetingActionData>();
+  const feedback = fetcher.data;
+  const lastProcessedFeedbackRef = useRef<typeof feedback>(undefined);
+  const feedbackId = `speaker-mapping-${speaker.label}-feedback`;
+  const isSaving = fetcher.state !== "idle";
+  const error =
+    feedback?.intent === "save-speaker-mapping" &&
+    feedback.ok === false &&
+    feedback.speakerLabel === speaker.label
+      ? feedback.error
+      : null;
+
+  useEffect(() => {
+    if (feedback === lastProcessedFeedbackRef.current) {
+      return;
+    }
+
+    if (
+      feedback?.intent === "save-speaker-mapping" &&
+      feedback.speakerLabel === speaker.label
+    ) {
+      lastProcessedFeedbackRef.current = feedback;
+
+      if (feedback.ok) {
+        onNamePersist(feedback.speakerLabel, feedback.name);
+        onNameUnprotect(speaker.label);
+      }
+    }
+  }, [feedback, onNamePersist, onNameUnprotect, speaker.label]);
+
+  return (
+    <li className="space-y-2 text-sm">
+      <fetcher.Form method="post" preventScrollReset>
+        <input name="_intent" type="hidden" value="save-speaker-mapping" />
+        <input name="speakerLabel" type="hidden" value={speaker.label} />
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+          <SpeakerAvatar label={speaker.label} />
+          <div className="min-w-0 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <label
+                className="text-ink min-w-0 truncate font-medium"
+                htmlFor={`speaker-mapping-${speaker.label}`}
+              >
+                {speaker.label}
+              </label>
+              <span className="text-ink-muted shrink-0 font-mono text-xs tabular-nums">
+                {speaker.percentage}% ·{" "}
+                {durationSeconds === null
+                  ? "—"
+                  : formatDuration(Math.max(0, speaker.durationSeconds))}
+              </span>
+            </div>
+            <input
+              aria-describedby={feedbackId}
+              aria-invalid={error ? true : undefined}
+              className="border-hairline bg-surface-elevated text-ink placeholder:text-ink-subtle focus:border-brand w-full rounded-lg border px-3 py-2 text-sm transition outline-none disabled:cursor-wait disabled:opacity-70"
+              disabled={isSaving}
+              id={`speaker-mapping-${speaker.label}`}
+              maxLength={100}
+              name="name"
+              onBlur={(event) => {
+                const trimmedValue = event.currentTarget.value.trim();
+
+                if (trimmedValue === persistedName.trim()) {
+                  onNameUnprotect(speaker.label);
+                  return;
+                }
+
+                if (event.currentTarget.form) {
+                  onNameProtect(speaker.label);
+                  fetcher.submit(event.currentTarget.form);
+                }
+              }}
+              onChange={(event) =>
+                onNameChange(speaker.label, event.target.value)
+              }
+              onFocus={() => onNameProtect(speaker.label)}
+              placeholder="Add name"
+              type="text"
+              value={value}
+            />
+            <p
+              className={
+                error ? "text-danger text-xs" : "text-ink-muted text-xs"
+              }
+              id={feedbackId}
+            >
+              {error ?? (isSaving ? "Saving…" : "Blur to save")}
+            </p>
+          </div>
+        </div>
+      </fetcher.Form>
+    </li>
   );
 }
 
@@ -1066,12 +1314,24 @@ function getSpeakerStats(segments: TranscriptSegment[]) {
           ? 0
           : Math.round((durationSeconds / totalDuration) * 100),
     }))
-    .sort((left, right) => right.durationSeconds - left.durationSeconds);
+    .sort((left, right) => compareSpeakerLabels(left.label, right.label));
+}
+
+function compareSpeakerLabels(leftLabel: string, rightLabel: string) {
+  const leftMatch = /^SPEAKER_(\d+)$/.exec(leftLabel);
+  const rightMatch = /^SPEAKER_(\d+)$/.exec(rightLabel);
+
+  if (leftMatch && rightMatch) {
+    return Number(leftMatch[1]) - Number(rightMatch[1]);
+  }
+
+  return leftLabel.localeCompare(rightLabel);
 }
 
 function getKeyTopics(
   summary: MeetingSummary | null,
   segments: TranscriptSegment[],
+  speakerMap: SpeakerMap = {},
 ): TopicItem[] {
   if (summary === null) {
     return [];
@@ -1081,21 +1341,29 @@ function getKeyTopics(
     .slice(0, 6)
     .map((segment) => formatTranscriptTimestamp(segment.startSeconds));
 
-  const decisions = summary.decisions.slice(0, 3).map((decision, index) => ({
-    description: decision.text,
-    label: summarizeTopicLabel(decision.text),
-    timestamp: transcriptTimes[index] ?? `${(index + 1) * 8}:10`,
-  }));
+  const decisions = summary.decisions.slice(0, 3).map((decision, index) => {
+    const mappedText = applySpeakerMap(decision.text, speakerMap);
+
+    return {
+      description: mappedText,
+      label: summarizeTopicLabel(mappedText),
+      timestamp: transcriptTimes[index] ?? `${(index + 1) * 8}:10`,
+    };
+  });
 
   if (decisions.length > 0) {
     return decisions;
   }
 
-  return summary.actionItems.slice(0, 3).map((item, index) => ({
-    description: item.task,
-    label: summarizeTopicLabel(item.task),
-    timestamp: transcriptTimes[index] ?? `${(index + 1) * 8}:10`,
-  }));
+  return summary.actionItems.slice(0, 3).map((item, index) => {
+    const mappedTask = applySpeakerMap(item.task, speakerMap);
+
+    return {
+      description: mappedTask,
+      label: summarizeTopicLabel(mappedTask),
+      timestamp: transcriptTimes[index] ?? `${(index + 1) * 8}:10`,
+    };
+  });
 }
 
 function summarizeTopicLabel(text: string) {

@@ -1,6 +1,7 @@
 import { asc, desc, eq } from "drizzle-orm";
 import {
   meetings,
+  speakerMappings,
   summaries,
   transcriptSegments,
   type ErrorKind,
@@ -15,6 +16,7 @@ import type {
   MeetingDetail,
   MeetingDetailRouteData,
   MeetingSummary,
+  SpeakerMapping,
   TranscriptSegment,
 } from "./meetings-list";
 
@@ -44,12 +46,17 @@ export type SummaryRow = {
 
 export type TranscriptSegmentRow = TranscriptSegment;
 
+export type SpeakerMappingRow = SpeakerMapping;
+
 type MeetingDetailLoaderOptions = {
   findMeetingById?: (meetingId: string) => Promise<MeetingDetailRow | null>;
   findSummaryByMeetingId?: (meetingId: string) => Promise<SummaryRow | null>;
   findTranscriptSegmentsByMeetingId?: (
     meetingId: string,
   ) => Promise<TranscriptSegmentRow[]>;
+  findSpeakerMappingsByMeetingId?: (
+    meetingId: string,
+  ) => Promise<SpeakerMappingRow[]>;
 };
 
 export async function loadHomeMeetings(): Promise<HomeMeetingListItem[]> {
@@ -97,15 +104,21 @@ export async function loadMeetingDetailRouteData(
   const summaryRow = await (
     options.findSummaryByMeetingId ?? findSummaryByMeetingId
   )(meeting.id);
-  const transcriptSegments = await (
+  const transcriptSegmentRows = await (
     options.findTranscriptSegmentsByMeetingId ??
     findTranscriptSegmentsByMeetingId
+  )(meeting.id);
+  const speakerMappingRows = await (
+    options.findSpeakerMappingsByMeetingId ?? findSpeakerMappingsByMeetingId
   )(meeting.id);
 
   return {
     meeting,
     summary: summaryRow === null ? null : serializeSummaryRow(summaryRow),
-    transcriptSegments: transcriptSegments.map(serializeTranscriptSegmentRow),
+    transcriptSegments: transcriptSegmentRows.map(
+      serializeTranscriptSegmentRow,
+    ),
+    speakerMappings: speakerMappingRows.map(serializeSpeakerMappingRow),
   };
 }
 
@@ -172,6 +185,13 @@ function serializeTranscriptSegmentRow(
   };
 }
 
+function serializeSpeakerMappingRow(row: SpeakerMappingRow): SpeakerMapping {
+  return {
+    speakerLabel: row.speakerLabel,
+    name: row.name,
+  };
+}
+
 async function findSummaryByMeetingId(
   meetingId: string,
 ): Promise<SummaryRow | null> {
@@ -210,6 +230,21 @@ async function findTranscriptSegmentsByMeetingId(
       asc(transcriptSegments.startSeconds),
       asc(transcriptSegments.endSeconds),
     );
+}
+
+async function findSpeakerMappingsByMeetingId(
+  meetingId: string,
+): Promise<SpeakerMappingRow[]> {
+  const database = await getDatabase();
+
+  return database
+    .select({
+      speakerLabel: speakerMappings.speakerLabel,
+      name: speakerMappings.name,
+    })
+    .from(speakerMappings)
+    .where(eq(speakerMappings.meetingId, meetingId))
+    .orderBy(asc(speakerMappings.speakerLabel));
 }
 
 async function getDatabase() {

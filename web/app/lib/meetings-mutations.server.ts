@@ -1,9 +1,11 @@
-import { eq } from "drizzle-orm";
-import { meetings } from "~/db/schema";
+import { and, eq } from "drizzle-orm";
+import { meetings, speakerMappings, transcriptSegments } from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
 import { removeMeetingDirectory as removeMeetingStorageDirectory } from "./meeting-storage.server";
 
 const maxMeetingTitleLength = 200;
+const maxSpeakerNameLength = 100;
+const speakerLabelPattern = /^SPEAKER_\d+$/;
 
 export class MeetingMutationError extends Error {
   readonly status: 400 | 404;
@@ -24,6 +26,12 @@ export type DeleteMeetingResult = {
   id: string;
 };
 
+export type SaveSpeakerMappingResult = {
+  meetingId: string;
+  speakerLabel: string;
+  name: string | null;
+};
+
 type DeleteMeetingOptions = {
   findMeetingById?: (meetingId: string) => Promise<{ id: string } | null>;
   removeMeetingDirectory?: (meetingId: string) => Promise<void>;
@@ -35,6 +43,23 @@ type UpdateMeetingTitleOptions = {
     meetingId: string,
     title: string,
   ) => Promise<UpdateMeetingTitleResult | null>;
+};
+
+type SaveSpeakerMappingOptions = {
+  findMeetingById?: (meetingId: string) => Promise<{ id: string } | null>;
+  speakerLabelExistsForMeeting?: (
+    meetingId: string,
+    speakerLabel: string,
+  ) => Promise<boolean>;
+  upsertSpeakerMapping?: (
+    meetingId: string,
+    speakerLabel: string,
+    name: string,
+  ) => Promise<SaveSpeakerMappingResult>;
+  deleteSpeakerMapping?: (
+    meetingId: string,
+    speakerLabel: string,
+  ) => Promise<void>;
 };
 
 export async function deleteMeetingAndArtifacts(
@@ -61,6 +86,52 @@ export async function deleteMeetingAndArtifacts(
   return { id: input.meetingId };
 }
 
+export async function saveSpeakerMapping(
+  input: {
+    meetingId: string | undefined;
+    speakerLabel: unknown;
+    name: unknown;
+  },
+  options: SaveSpeakerMappingOptions = {},
+): Promise<SaveSpeakerMappingResult> {
+  if (!isMeetingId(input.meetingId)) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  const speakerLabel = validateSpeakerLabel(input.speakerLabel);
+  const name = validateSpeakerName(input.name);
+  const meeting = await (options.findMeetingById ?? findMeetingById)(
+    input.meetingId,
+  );
+
+  if (meeting === null) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  const isDiscoveredSpeakerLabel = await (
+    options.speakerLabelExistsForMeeting ?? speakerLabelExistsForMeeting
+  )(input.meetingId, speakerLabel);
+
+  if (!isDiscoveredSpeakerLabel) {
+    throw new MeetingMutationError("Choose a discovered speaker label.", 400);
+  }
+
+  if (name.length === 0) {
+    await (options.deleteSpeakerMapping ?? deleteSpeakerMapping)(
+      input.meetingId,
+      speakerLabel,
+    );
+
+    return { meetingId: input.meetingId, speakerLabel, name: null };
+  }
+
+  return (options.upsertSpeakerMapping ?? upsertSpeakerMapping)(
+    input.meetingId,
+    speakerLabel,
+    name,
+  );
+}
+
 export async function updateMeetingTitle(
   input: { meetingId: string | undefined; title: unknown },
   options: UpdateMeetingTitleOptions = {},
@@ -80,6 +151,34 @@ export async function updateMeetingTitle(
   }
 
   return result;
+}
+
+function validateSpeakerLabel(speakerLabel: unknown) {
+  if (
+    typeof speakerLabel !== "string" ||
+    !speakerLabelPattern.test(speakerLabel)
+  ) {
+    throw new MeetingMutationError("Choose a valid speaker label.", 400);
+  }
+
+  return speakerLabel;
+}
+
+function validateSpeakerName(name: unknown) {
+  if (typeof name !== "string") {
+    throw new MeetingMutationError("Enter a speaker name.", 400);
+  }
+
+  const trimmedName = name.trim();
+
+  if (trimmedName.length > maxSpeakerNameLength) {
+    throw new MeetingMutationError(
+      "Speaker name must be 100 characters or fewer.",
+      400,
+    );
+  }
+
+  return trimmedName;
 }
 
 function validateMeetingTitle(title: unknown) {
@@ -113,6 +212,21 @@ async function deleteMeetingById(meetingId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+async function deleteSpeakerMapping(
+  meetingId: string,
+  speakerLabel: string,
+): Promise<void> {
+  const database = await getDatabase();
+  await database
+    .delete(speakerMappings)
+    .where(
+      and(
+        eq(speakerMappings.meetingId, meetingId),
+        eq(speakerMappings.speakerLabel, speakerLabel),
+      ),
+    );
+}
+
 async function findMeetingById(
   meetingId: string,
 ): Promise<{ id: string } | null> {
@@ -124,6 +238,47 @@ async function findMeetingById(
     .limit(1);
 
   return row ?? null;
+}
+
+async function speakerLabelExistsForMeeting(
+  meetingId: string,
+  speakerLabel: string,
+): Promise<boolean> {
+  const database = await getDatabase();
+  const [row] = await database
+    .select({ id: transcriptSegments.id })
+    .from(transcriptSegments)
+    .where(
+      and(
+        eq(transcriptSegments.meetingId, meetingId),
+        eq(transcriptSegments.speakerLabel, speakerLabel),
+      ),
+    )
+    .limit(1);
+
+  return row !== undefined;
+}
+
+async function upsertSpeakerMapping(
+  meetingId: string,
+  speakerLabel: string,
+  name: string,
+): Promise<SaveSpeakerMappingResult> {
+  const database = await getDatabase();
+  const [row] = await database
+    .insert(speakerMappings)
+    .values({ meetingId, speakerLabel, name })
+    .onConflictDoUpdate({
+      target: [speakerMappings.meetingId, speakerMappings.speakerLabel],
+      set: { name, updatedAt: new Date() },
+    })
+    .returning({
+      meetingId: speakerMappings.meetingId,
+      speakerLabel: speakerMappings.speakerLabel,
+      name: speakerMappings.name,
+    });
+
+  return row;
 }
 
 async function removeStoredMeetingDirectory(meetingId: string) {

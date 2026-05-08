@@ -8,6 +8,74 @@ import { MeetingMutationError } from "./meetings-mutations.server";
 const meetingId = "00000000-0000-4000-8000-000000000006";
 
 describe("meeting detail route action", () => {
+  test("saves a speaker mapping through the speaker mapping mutation", async () => {
+    const formData = new FormData();
+    const calls: Array<{
+      meetingId: string | undefined;
+      speakerLabel: unknown;
+      name: unknown;
+    }> = [];
+
+    formData.set("_intent", "save-speaker-mapping");
+    formData.set("speakerLabel", "SPEAKER_00");
+    formData.set("name", "Atila");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        saveSpeakerMapping: async (input) => {
+          calls.push(input);
+          return {
+            meetingId: input.meetingId ?? "",
+            speakerLabel: String(input.speakerLabel),
+            name: String(input.name),
+          };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: true,
+        intent: "save-speaker-mapping",
+        speakerLabel: "SPEAKER_00",
+        name: "Atila",
+      },
+    } satisfies MeetingDetailActionResult);
+    expect(calls).toEqual([
+      { meetingId, speakerLabel: "SPEAKER_00", name: "Atila" },
+    ]);
+  });
+
+  test("returns speaker mapping validation feedback with the speaker label", async () => {
+    const formData = new FormData();
+
+    formData.set("_intent", "save-speaker-mapping");
+    formData.set("speakerLabel", "speaker-00");
+    formData.set("name", "Atila");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        saveSpeakerMapping: async () => {
+          throw new MeetingMutationError("Choose a valid speaker label.", 400);
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: false,
+        intent: "save-speaker-mapping",
+        speakerLabel: "speaker-00",
+        error: "Choose a valid speaker label.",
+      },
+      status: 400,
+    } satisfies MeetingDetailActionResult);
+  });
+
   test("updates the title through the title mutation", async () => {
     const formData = new FormData();
     const calls: Array<{ meetingId: string | undefined; title: unknown }> = [];

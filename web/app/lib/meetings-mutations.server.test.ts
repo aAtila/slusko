@@ -6,10 +6,196 @@ import { removeMeetingDirectory } from "./meeting-storage.server";
 import {
   deleteMeetingAndArtifacts,
   MeetingMutationError,
+  saveSpeakerMapping,
   updateMeetingTitle,
 } from "./meetings-mutations.server";
 
 const meetingId = "00000000-0000-4000-8000-000000000006";
+
+describe("speaker mapping mutations", () => {
+  test("trims and upserts a speaker mapping scoped to one meeting", async () => {
+    const calls: Array<{
+      meetingId: string;
+      speakerLabel: string;
+      name: string;
+    }> = [];
+
+    const result = await saveSpeakerMapping(
+      { meetingId, speakerLabel: "SPEAKER_00", name: "  Atila  " },
+      {
+        findMeetingById: async (id) => ({ id }),
+        speakerLabelExistsForMeeting: async () => true,
+        upsertSpeakerMapping: async (id, speakerLabel, name) => {
+          calls.push({ meetingId: id, speakerLabel, name });
+          return { meetingId: id, speakerLabel, name };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      meetingId,
+      speakerLabel: "SPEAKER_00",
+      name: "Atila",
+    });
+    expect(calls).toEqual([
+      { meetingId, speakerLabel: "SPEAKER_00", name: "Atila" },
+    ]);
+  });
+
+  test("clears a mapping by deleting the meeting-scoped row when name is blank", async () => {
+    const deletedRows: Array<{ meetingId: string; speakerLabel: string }> = [];
+
+    const result = await saveSpeakerMapping(
+      { meetingId, speakerLabel: "SPEAKER_01", name: "   " },
+      {
+        findMeetingById: async (id) => ({ id }),
+        speakerLabelExistsForMeeting: async () => true,
+        deleteSpeakerMapping: async (id, speakerLabel) => {
+          deletedRows.push({ meetingId: id, speakerLabel });
+        },
+        upsertSpeakerMapping: async () => {
+          throw new Error("blank names should not be upserted");
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      meetingId,
+      speakerLabel: "SPEAKER_01",
+      name: null,
+    });
+    expect(deletedRows).toEqual([{ meetingId, speakerLabel: "SPEAKER_01" }]);
+  });
+
+  test("rejects speaker mappings for labels not discovered in the meeting transcript", async () => {
+    let persisted = false;
+
+    const error = await captureMeetingMutationError(
+      saveSpeakerMapping(
+        { meetingId, speakerLabel: "SPEAKER_99", name: "Atila" },
+        {
+          findMeetingById: async (id) => ({ id }),
+          speakerLabelExistsForMeeting: async () => false,
+          upsertSpeakerMapping: async () => {
+            persisted = true;
+            return { meetingId, speakerLabel: "SPEAKER_99", name: "Atila" };
+          },
+        },
+      ),
+    );
+
+    expect(error.status).toBe(400);
+    expect(error.message).toBe("Choose a discovered speaker label.");
+    expect(persisted).toBe(false);
+  });
+
+  test("accepts speaker mappings for labels discovered in the meeting transcript", async () => {
+    const result = await saveSpeakerMapping(
+      { meetingId, speakerLabel: "SPEAKER_00", name: "Atila" },
+      {
+        findMeetingById: async (id) => ({ id }),
+        speakerLabelExistsForMeeting: async () => true,
+        upsertSpeakerMapping: async (id, speakerLabel, name) => ({
+          meetingId: id,
+          speakerLabel,
+          name,
+        }),
+      },
+    );
+
+    expect(result).toEqual({
+      meetingId,
+      speakerLabel: "SPEAKER_00",
+      name: "Atila",
+    });
+  });
+
+  test("rejects invalid speaker mapping input before persisting", async () => {
+    const invalidInputs: Array<{
+      speakerLabel: unknown;
+      name: unknown;
+      message: string;
+    }> = [
+      {
+        speakerLabel: "speaker-00",
+        name: "Atila",
+        message: "Choose a valid speaker label.",
+      },
+      {
+        speakerLabel: "SPEAKER_00",
+        name: undefined,
+        message: "Enter a speaker name.",
+      },
+      {
+        speakerLabel: "SPEAKER_00",
+        name: "a".repeat(101),
+        message: "Speaker name must be 100 characters or fewer.",
+      },
+    ];
+
+    for (const input of invalidInputs) {
+      const error = await captureMeetingMutationError(
+        saveSpeakerMapping(
+          { meetingId, speakerLabel: input.speakerLabel, name: input.name },
+          {
+            findMeetingById: async (id) => ({ id }),
+            speakerLabelExistsForMeeting: async () => true,
+            upsertSpeakerMapping: async () => {
+              throw new Error("invalid mappings must not be upserted");
+            },
+            deleteSpeakerMapping: async () => {
+              throw new Error("invalid mappings must not be deleted");
+            },
+          },
+        ),
+      );
+
+      expect(error.status).toBe(400);
+      expect(error.message).toBe(input.message);
+    }
+  });
+
+  test("treats invalid or unknown meeting ids as not found before persistence", async () => {
+    let findWasCalled = false;
+    let persistenceWasCalled = false;
+
+    const invalidIdError = await captureMeetingMutationError(
+      saveSpeakerMapping(
+        { meetingId: "not-a-uuid", speakerLabel: "SPEAKER_00", name: "Atila" },
+        {
+          findMeetingById: async () => {
+            findWasCalled = true;
+            return { id: meetingId };
+          },
+          speakerLabelExistsForMeeting: async () => true,
+          upsertSpeakerMapping: async () => {
+            persistenceWasCalled = true;
+            return { meetingId, speakerLabel: "SPEAKER_00", name: "Atila" };
+          },
+        },
+      ),
+    );
+
+    const missingMeetingError = await captureMeetingMutationError(
+      saveSpeakerMapping(
+        { meetingId, speakerLabel: "SPEAKER_00", name: "Atila" },
+        {
+          findMeetingById: async () => null,
+          speakerLabelExistsForMeeting: async () => true,
+          upsertSpeakerMapping: async () => {
+            persistenceWasCalled = true;
+            return { meetingId, speakerLabel: "SPEAKER_00", name: "Atila" };
+          },
+        },
+      ),
+    );
+
+    expect(invalidIdError.status).toBe(404);
+    expect(missingMeetingError.status).toBe(404);
+    expect(findWasCalled).toBe(false);
+    expect(persistenceWasCalled).toBe(false);
+  });
+});
 
 describe("meeting metadata mutations", () => {
   test("trims and persists an updated meeting title", async () => {

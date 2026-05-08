@@ -102,6 +102,29 @@ describe("meeting detail loader helpers", () => {
     expect(finderWasCalled).toBe(false);
   });
 
+  test("route data helper includes per-meeting speaker mappings", async () => {
+    const mappingCalls: string[] = [];
+
+    const routeData = await loadMeetingDetailRouteData(meetingId, {
+      findMeetingById: async (id) => (id === meetingId ? detailRow() : null),
+      findSummaryByMeetingId: async () => null,
+      findTranscriptSegmentsByMeetingId: async () => [],
+      findSpeakerMappingsByMeetingId: async (id) => {
+        mappingCalls.push(id);
+        return [
+          { speakerLabel: "SPEAKER_00", name: "Atila" },
+          { speakerLabel: "SPEAKER_01", name: "Marko" },
+        ];
+      },
+    });
+
+    expect(routeData.speakerMappings).toEqual([
+      { speakerLabel: "SPEAKER_00", name: "Atila" },
+      { speakerLabel: "SPEAKER_01", name: "Marko" },
+    ]);
+    expect(mappingCalls).toEqual([meetingId]);
+  });
+
   test("route data helper includes transcript segments", async () => {
     const transcriptCalls: string[] = [];
 
@@ -120,6 +143,7 @@ describe("meeting detail loader helpers", () => {
           transcriptSegmentRow(),
         ];
       },
+      findSpeakerMappingsByMeetingId: async () => [],
     });
 
     expect(routeData.meeting.id).toBe(meetingId);
@@ -161,6 +185,7 @@ describe("meeting detail loader helpers", () => {
       findMeetingById: async () => detailRow(),
       findSummaryByMeetingId: async () => null,
       findTranscriptSegmentsByMeetingId: async () => [],
+      findSpeakerMappingsByMeetingId: async () => [],
     });
 
     expect(routeData.summary).toBeNull();
@@ -181,6 +206,11 @@ describe("meeting detail loader helpers", () => {
         findTranscriptSegmentsByMeetingId: async () => {
           transcriptFinderWasCalled = true;
           return [];
+        },
+        findSpeakerMappingsByMeetingId: async () => {
+          throw new Error(
+            "speaker mappings should not be loaded for missing meetings",
+          );
         },
       }),
     );

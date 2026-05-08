@@ -38,11 +38,76 @@ export type MeetingSummary = {
   updatedAt: string;
 };
 
+export type SpeakerMapping = {
+  speakerLabel: string;
+  name: string;
+};
+
+export type SpeakerMap = Readonly<Record<string, string | undefined>>;
+
 export type MeetingDetailRouteData = {
   meeting: MeetingDetail;
   summary: MeetingSummary | null;
   transcriptSegments: TranscriptSegment[];
+  speakerMappings: SpeakerMapping[];
 };
+
+export function createSpeakerMap(mappings: SpeakerMapping[]): SpeakerMap {
+  return Object.fromEntries(
+    mappings.map((mapping) => [mapping.speakerLabel, mapping.name]),
+  );
+}
+
+export function applySpeakerMap(text: string, speakerMap: SpeakerMap): string {
+  const labels = Object.entries(speakerMap)
+    .flatMap(([label, name]) => {
+      const trimmedName = name?.trim();
+
+      return trimmedName ? [[label, trimmedName] as const] : [];
+    })
+    .sort(
+      ([firstLabel], [secondLabel]) => secondLabel.length - firstLabel.length,
+    );
+
+  if (labels.length === 0) {
+    return text;
+  }
+
+  const nameByLabel = new Map(labels);
+  const labelPattern = labels.map(([label]) => escapeRegExp(label)).join("|");
+  const speakerLabelRegex = new RegExp(
+    `(?<![A-Za-z0-9_])(${labelPattern})(?![A-Za-z0-9_])`,
+    "g",
+  );
+
+  return text.replaceAll(
+    speakerLabelRegex,
+    (speakerLabel) => nameByLabel.get(speakerLabel) ?? speakerLabel,
+  );
+}
+
+function escapeRegExp(value: string) {
+  const escapedCharacters = new Set([
+    "\\",
+    ".",
+    "*",
+    "+",
+    "?",
+    "^",
+    "$",
+    "{",
+    "}",
+    "(",
+    ")",
+    "|",
+    "[",
+    "]",
+  ]);
+
+  return Array.from(value, (character) =>
+    escapedCharacters.has(character) ? `\${character}` : character,
+  ).join("");
+}
 
 export type MeetingStatusTone = "active" | "danger" | "queued" | "success";
 

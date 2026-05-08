@@ -1,30 +1,43 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { MeetingStatus } from "~/db/schema";
-import type { MeetingSummary, TranscriptSegment } from "~/lib/meetings-list";
+import type {
+  MeetingSummary,
+  SpeakerMap,
+  TranscriptSegment,
+} from "~/lib/meetings-list";
 import { SummaryPanel, TranscriptPanel } from "./meetings.$meetingId";
 
 function renderTranscriptPanel({
   segments,
+  speakerMap = {},
   status,
 }: {
   segments: TranscriptSegment[];
+  speakerMap?: SpeakerMap;
   status: MeetingStatus;
 }) {
   return renderToStaticMarkup(
-    <TranscriptPanel segments={segments} status={status} />,
+    <TranscriptPanel
+      segments={segments}
+      speakerMap={speakerMap}
+      status={status}
+    />,
   );
 }
 
 function renderSummaryPanel({
+  speakerMap = {},
   summary,
   status,
 }: {
+  speakerMap?: SpeakerMap;
   summary: MeetingSummary | null;
   status: MeetingStatus;
 }) {
   return renderToStaticMarkup(
-    <SummaryPanel summary={summary} status={status} />,
+    <SummaryPanel speakerMap={speakerMap} summary={summary} status={status} />,
   );
 }
 
@@ -67,6 +80,37 @@ describe("SummaryPanel", () => {
     expect(markup).not.toContain("contenteditable");
   });
 
+  test("applies speaker mappings to rendered summary prose and speaker owners", () => {
+    const markup = renderSummaryPanel({
+      speakerMap: { SPEAKER_00: "Atila", SPEAKER_01: "Marko" },
+      status: "done",
+      summary: {
+        overview: "SPEAKER_00 aligned with SPEAKER_01.",
+        decisions: [{ text: "SPEAKER_01 owns rollout." }],
+        actionItems: [
+          {
+            task: "SPEAKER_00 will publish notes.",
+            owner: { kind: "speaker", value: "SPEAKER_00" },
+          },
+          {
+            task: "SPEAKER_02 remains unmapped.",
+            owner: { kind: "speaker", value: "SPEAKER_02" },
+          },
+        ],
+        openQuestions: [{ text: "Should SPEAKER_01 invite design?" }],
+        updatedAt: "2026-05-07T20:00:00.000Z",
+      },
+    });
+
+    expect(markup).toContain("Atila aligned with Marko.");
+    expect(markup).toContain("Marko owns rollout.");
+    expect(markup).toContain("Atila will publish notes.");
+    expect(markup).toContain("Owner: Atila");
+    expect(markup).toContain("SPEAKER_02 remains unmapped.");
+    expect(markup).toContain("Owner: SPEAKER_02");
+    expect(markup).toContain("Should Marko invite design?");
+  });
+
   test("renders status-aware empty state copy", () => {
     expect(
       renderSummaryPanel({ summary: null, status: "summarizing" }),
@@ -77,6 +121,25 @@ describe("SummaryPanel", () => {
     expect(renderSummaryPanel({ summary: null, status: "done" })).toContain(
       "Summary is not available for this meeting.",
     );
+  });
+});
+
+describe("Speakers panel markup contract", () => {
+  test("keeps blur-save intent hidden fields, no visible per-row save button, and textbox row rendering in source", () => {
+    const source = readFileSync(
+      new URL("./meetings.$meetingId.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain(
+      'name="_intent" type="hidden" value="save-speaker-mapping"',
+    );
+    expect(source).toContain(
+      'name="speakerLabel" type="hidden" value={speaker.label}',
+    );
+    expect(source).toContain("id={`speaker-mapping-${speaker.label}`}");
+    expect(source).toContain('type="text"');
+    expect(source).not.toContain("Save</button>");
   });
 });
 
@@ -111,6 +174,33 @@ describe("TranscriptPanel", () => {
     expect(markup).not.toContain("<input");
     expect(markup).not.toContain("<textarea");
     expect(markup).not.toContain("contenteditable");
+  });
+
+  test("applies speaker mappings to transcript display names", () => {
+    const markup = renderTranscriptPanel({
+      speakerMap: { SPEAKER_00: "Atila" },
+      status: "done",
+      segments: [
+        {
+          id: "00000000-0000-4000-8000-00000000a114",
+          startSeconds: 0,
+          endSeconds: 2,
+          speakerLabel: "SPEAKER_00",
+          text: "Mapped row.",
+        },
+        {
+          id: "00000000-0000-4000-8000-00000000a115",
+          startSeconds: 3,
+          endSeconds: 5,
+          speakerLabel: "SPEAKER_01",
+          text: "Unmapped row.",
+        },
+      ],
+    });
+
+    expect(markup).toContain("Atila");
+    expect(markup).toContain("SPEAKER_01");
+    expect(markup).not.toContain("Speaker 1");
   });
 
   test("keeps transcript rows visible while diarizing", () => {
