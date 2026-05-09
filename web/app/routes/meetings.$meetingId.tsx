@@ -1072,7 +1072,10 @@ export function TranscriptPanel({
 
             return (
               <li className="flex gap-4" key={segment.id}>
-                <SpeakerAvatar label={segment.speakerLabel} />
+                <SpeakerAvatar
+                  label={segment.speakerLabel}
+                  name={speakerName}
+                />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <p className="text-ink text-sm font-medium">
@@ -1393,6 +1396,8 @@ function SpeakerMappingRow({
     feedback.speakerLabel === speaker.label
       ? feedback.error
       : null;
+  const [isEditing, setIsEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (feedback === lastProcessedFeedbackRef.current) {
@@ -1408,25 +1413,60 @@ function SpeakerMappingRow({
       if (feedback.ok) {
         onNamePersist(feedback.speakerLabel, feedback.name);
         onNameUnprotect(speaker.label);
+        setIsEditing(false);
       }
     }
   }, [feedback, onNamePersist, onNameUnprotect, speaker.label]);
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
+
+  const beginEdit = () => {
+    onNameChange(speaker.label, persistedName);
+    setIsEditing(true);
+  };
+
+  const trimmedPersistedName = persistedName.trim();
+  const headingLabel = trimmedPersistedName || speaker.label;
 
   return (
     <li className="space-y-2 text-sm">
       <fetcher.Form method="post" preventScrollReset>
         <input name="_intent" type="hidden" value="save-speaker-mapping" />
         <input name="speakerLabel" type="hidden" value={speaker.label} />
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-          <SpeakerAvatar label={speaker.label} />
+        <div
+          className={`grid grid-cols-[auto_minmax(0,1fr)] gap-3 ${
+            isEditing ? "items-start" : "items-center"
+          }`}
+        >
+          <SpeakerAvatar
+            label={speaker.label}
+            name={trimmedPersistedName || value}
+          />
           <div className="min-w-0 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <label
-                className="text-ink min-w-0 truncate font-medium"
-                htmlFor={`speaker-mapping-${speaker.label}`}
-              >
-                {speaker.label}
-              </label>
+            <div className="group flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <label
+                  className="text-ink min-w-0 truncate font-medium"
+                  htmlFor={`speaker-mapping-${speaker.label}`}
+                >
+                  {headingLabel}
+                </label>
+                {!isEditing ? (
+                  <button
+                    aria-label={`Edit name for ${speaker.label}`}
+                    className="text-ink-subtle hover:bg-surface-sunken hover:text-ink-soft focus-visible:bg-surface-sunken focus-visible:text-ink-soft inline-flex size-6 shrink-0 items-center justify-center rounded-md opacity-40 transition group-focus-within:opacity-100 group-hover:opacity-100"
+                    onClick={beginEdit}
+                    type="button"
+                  >
+                    <Icon className="size-3.5" name="pencil" />
+                  </button>
+                ) : null}
+              </div>
               <span className="text-ink-muted shrink-0 font-mono text-xs tabular-nums">
                 {speaker.percentage}% ·{" "}
                 {durationSeconds === null
@@ -1434,43 +1474,61 @@ function SpeakerMappingRow({
                   : formatDuration(Math.max(0, speaker.durationSeconds))}
               </span>
             </div>
-            <input
-              aria-describedby={feedbackId}
-              aria-invalid={error ? true : undefined}
-              className="border-hairline bg-surface-elevated text-ink placeholder:text-ink-subtle focus:border-brand w-full rounded-lg border px-3 py-2 text-sm transition outline-none disabled:cursor-wait disabled:opacity-70"
-              disabled={isSaving}
-              id={`speaker-mapping-${speaker.label}`}
-              maxLength={100}
-              name="name"
-              onBlur={(event) => {
-                const trimmedValue = event.currentTarget.value.trim();
+            {isEditing ? (
+              <>
+                <input
+                  aria-describedby={feedbackId}
+                  aria-invalid={error ? true : undefined}
+                  className="border-hairline bg-surface-elevated text-ink placeholder:text-ink-subtle focus:border-brand w-full rounded-lg border px-3 py-2 text-sm transition outline-none disabled:cursor-wait disabled:opacity-70"
+                  disabled={isSaving}
+                  id={`speaker-mapping-${speaker.label}`}
+                  maxLength={100}
+                  name="name"
+                  onBlur={(event) => {
+                    const trimmedValue = event.currentTarget.value.trim();
 
-                if (trimmedValue === persistedName.trim()) {
-                  onNameUnprotect(speaker.label);
-                  return;
-                }
+                    if (trimmedValue === persistedName.trim()) {
+                      onNameUnprotect(speaker.label);
+                      setIsEditing(false);
+                      return;
+                    }
 
-                if (event.currentTarget.form) {
-                  onNameProtect(speaker.label);
-                  fetcher.submit(event.currentTarget.form);
-                }
-              }}
-              onChange={(event) =>
-                onNameChange(speaker.label, event.target.value)
-              }
-              onFocus={() => onNameProtect(speaker.label)}
-              placeholder="Add name"
-              type="text"
-              value={value}
-            />
-            <p
-              className={
-                error ? "text-danger text-xs" : "text-ink-muted text-xs"
-              }
-              id={feedbackId}
-            >
-              {error ?? (isSaving ? "Saving…" : "Blur to save")}
-            </p>
+                    if (event.currentTarget.form) {
+                      onNameProtect(speaker.label);
+                      fetcher.submit(event.currentTarget.form);
+                    }
+                  }}
+                  onChange={(event) =>
+                    onNameChange(speaker.label, event.target.value)
+                  }
+                  onFocus={() => onNameProtect(speaker.label)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      onNameChange(speaker.label, persistedName);
+                      onNameUnprotect(speaker.label);
+                      setIsEditing(false);
+                    }
+                  }}
+                  placeholder="Add name"
+                  ref={inputRef}
+                  type="text"
+                  value={value}
+                />
+                <p
+                  className={
+                    error ? "text-danger text-xs" : "text-ink-muted text-xs"
+                  }
+                  id={feedbackId}
+                >
+                  {error ?? (isSaving ? "Saving…" : "Blur to save")}
+                </p>
+              </>
+            ) : error ? (
+              <p className="text-danger text-xs" id={feedbackId}>
+                {error}
+              </p>
+            ) : null}
           </div>
         </div>
       </fetcher.Form>
@@ -1707,9 +1765,12 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   );
 }
 
-function SpeakerAvatar({ label }: { label: string }) {
-  const initial = formatSpeakerLabel(label).charAt(0).toUpperCase() || "S";
-  const colorIndex = Math.abs(hashString(label)) % speakerAvatarClasses.length;
+function SpeakerAvatar({ label, name }: { label: string; name?: string }) {
+  const trimmedName = name?.trim();
+  const initial = trimmedName
+    ? trimmedName.charAt(0).toUpperCase()
+    : formatSpeakerLabel(label).charAt(0).toUpperCase() || "S";
+  const colorIndex = getSpeakerColorIndex(label);
 
   return (
     <span
@@ -1734,12 +1795,24 @@ type TopicItem = {
 
 const speakerAvatarClasses = [
   "bg-brand-soft text-brand",
-  "bg-success-soft text-success",
-  "bg-accent-soft text-accent-deep",
-  "bg-warning-soft text-warning",
   "bg-[#e3dde9] text-[#5e4a73]",
+  "bg-warning-soft text-warning",
   "bg-[#dbdfe6] text-[#3b4860]",
+  "bg-accent-soft text-accent-deep",
+  "bg-[#cfe1de] text-[#2f5a52]",
+  "bg-danger-soft text-danger",
+  "bg-[#f0d6dc] text-[#7a3a48]",
 ] as const;
+
+function getSpeakerColorIndex(label: string) {
+  const speakerMatch = /^SPEAKER[_ -]?(\d+)$/i.exec(label.trim());
+
+  if (speakerMatch) {
+    return Number(speakerMatch[1]) % speakerAvatarClasses.length;
+  }
+
+  return Math.abs(hashString(label)) % speakerAvatarClasses.length;
+}
 
 function getSpeakerStats(segments: TranscriptSegment[]) {
   const durationBySpeaker = new Map<string, number>();
