@@ -355,6 +355,14 @@ class PipelineProcessor:
             self._queue.mark_summary_regeneration_failed(meeting)
             return
 
+        if not _summary_has_structured_sections(summary):
+            logger.warning(
+                "summary regeneration for meeting %s returned no structured sections",
+                meeting.id,
+            )
+            self._queue.mark_summary_regeneration_failed(meeting)
+            return
+
         self._queue.mark_summary_regeneration_succeeded(
             meeting=meeting,
             summary=summary,
@@ -383,6 +391,12 @@ class PipelineProcessor:
             error_message=failure.error_message,
             failed_at_stage=failure.failed_at_stage,
         )
+
+
+def _summary_has_structured_sections(summary: SummaryDraft) -> bool:
+    """Treat overview-only regeneration as failed so it cannot clear saved sections."""
+
+    return bool(summary.decisions or summary.action_items or summary.open_questions)
 
 
 class RecoveryStubProcessor:

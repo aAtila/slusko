@@ -8,6 +8,7 @@ from slusko_worker.db.models import (
     ErrorKind,
     MeetingStatus,
     QueuedMeeting,
+    SummaryDecisionDraft,
     SummaryDraft,
     SummaryRegenerationStatus,
     TranscriptSegmentDraft,
@@ -651,7 +652,7 @@ def test_summary_regeneration_reuses_raw_transcript_and_overwrites_current_summa
     queue.transcript_segments = raw_segments
     summary = SummaryDraft(
         overview="Regenerated overview",
-        decisions=(),
+        decisions=(SummaryDecisionDraft(text="Regenerated decision"),),
         action_items=(),
         open_questions=(),
     )
@@ -681,6 +682,40 @@ def test_summary_regeneration_reuses_raw_transcript_and_overwrites_current_summa
         ("load_transcript_segments", MEETING_ID),
         ("summarize", MEETING_ID, raw_segments),
         ("summary_regeneration_succeeded", MEETING_ID, summary),
+    ]
+
+
+def test_summary_regeneration_rejects_overview_only_result_to_preserve_existing_sections() -> None:
+    queue = FakeQueue()
+    raw_segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.0,
+            speaker_label="SPEAKER_00",
+            text="Raw transcript label",
+        )
+    ]
+    queue.transcript_segments = raw_segments
+    summary = SummaryDraft(
+        overview="Regenerated overview",
+        decisions=(),
+        action_items=(),
+        open_questions=(),
+    )
+    summarizer = FakeSummarizer(summary=summary, shared_events=queue.events)
+    processor = make_processor(queue=queue, summarizer=summarizer)
+
+    processor.process(
+        queued_meeting(
+            MeetingStatus.DONE,
+            summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+        )
+    )
+
+    assert queue.events == [
+        ("load_transcript_segments", MEETING_ID),
+        ("summarize", MEETING_ID, raw_segments),
+        ("summary_regeneration_failed", MEETING_ID),
     ]
 
 
