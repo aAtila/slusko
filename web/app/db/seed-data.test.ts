@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { meetingStatus } from "./schema";
+import { meetingStatus, summaryRegenerationStatus } from "./schema";
 import {
   developmentMeetingSeeds,
   developmentTranscriptSegmentSeeds,
@@ -14,6 +14,15 @@ function meetingIdsWithTranscriptRows() {
 }
 
 describe("development meeting seeds", () => {
+  test("defines the bounded summary regeneration lifecycle", () => {
+    expect(summaryRegenerationStatus.enumValues).toEqual([
+      "idle",
+      "pending",
+      "processing",
+      "failed",
+    ]);
+  });
+
   test("cover every canonical meeting status with stable IDs", () => {
     const ids = developmentMeetingSeeds.map((meeting) => meeting.id);
     const statuses = new Set(

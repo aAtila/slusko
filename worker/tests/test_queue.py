@@ -13,6 +13,7 @@ from slusko_worker.db.models import (
     MeetingStatus,
     QueuedMeeting,
     SummaryActionItemDraft,
+    SummaryRegenerationStatus,
     SummaryActionItemOwnerDraft,
     SummaryDecisionDraft,
     SummaryDraft,
@@ -27,6 +28,8 @@ from slusko_worker.db.queue import (
     MARK_NORMALIZATION_STARTED_SQL,
     MARK_SUMMARIZATION_STARTED_SQL,
     MARK_SUMMARIZATION_SUCCEEDED_SQL,
+    MARK_SUMMARY_REGENERATION_FAILED_SQL,
+    MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL,
     MARK_TRANSCRIPTION_STARTED_SQL,
     MARK_TRANSCRIPTION_SUCCEEDED_SQL,
     NON_TERMINAL_STATUSES,
@@ -124,7 +127,7 @@ def test_claim_sql_matches_queue_index_predicate_and_uses_skip_locked() -> None:
     for status in NON_TERMINAL_STATUSES:
         assert f"'{status.value}'" in sql
 
-    assert sql.startswith("with candidate as")
+    assert sql.startswith("with pipeline_candidate as")
     assert "update meetings" in sql
     assert "status = case when candidate.claimed_status = 'pending'" in sql
     assert "for update skip locked" in sql
@@ -158,7 +161,8 @@ def test_claim_next_executes_claim_inside_explicit_transaction() -> None:
 def test_claim_query_transitions_pending_claims_before_returning() -> None:
     sql = normalize_sql(CLAIM_NEXT_MEETING_SQL)
 
-    assert "with candidate as" in sql
+    assert "with pipeline_candidate as" in sql
+    assert "candidate as ( select * from pipeline_candidate union all select * from regeneration_candidate )" in sql
     assert "for update skip locked" in sql
     assert "update meetings" in sql
     assert "returning meeting.id" in sql
@@ -180,6 +184,42 @@ def test_claim_query_promotes_pending_retry_to_resume_stage() -> None:
     assert "then candidate.resume_from_stage" in sql
     assert "resume_from_stage = null" in sql
     assert "as status" in sql
+
+
+def test_claim_query_preserves_first_time_pipeline_priority_over_regeneration() -> None:
+    sql = normalize_sql(CLAIM_NEXT_MEETING_SQL)
+
+    assert "pipeline_candidate as" in sql
+    assert "regeneration_candidate as" in sql
+    assert "not exists (select 1 from pipeline_candidate)" in sql
+    assert "status = 'done'" in sql
+    assert "summary_regeneration_status = 'pending'" in sql
+    assert "summary_regeneration_status = 'processing'" in sql
+    assert "summary_regeneration_processing_started_at < now() - interval" in sql
+    assert "summary_regeneration_status = case when candidate.claimed_status = 'done' then 'processing'::summary_regeneration_status" in sql
+    assert "summary_regeneration_processing_started_at = case when candidate.claimed_status = 'done' then now()" in sql
+
+
+def test_claim_next_returns_regeneration_job_to_processor() -> None:
+    row = {
+        "id": UUID("00000000-0000-0000-0000-000000000001"),
+        "status": "done",
+        "resume_from_stage": None,
+        "transcription_progress": 100,
+        "error_kind": None,
+        "error_message": None,
+        "failed_at_stage": None,
+        "summary_regeneration_status": "processing",
+        "summary_regeneration_processing_started_at": None,
+    }
+    connection = RecordingConnection(row)
+    queue = PostgresMeetingQueue(lambda: connection)
+
+    meeting = queue.claim_next()
+
+    assert meeting is not None
+    assert meeting.status == MeetingStatus.DONE
+    assert meeting.summary_regeneration_status == SummaryRegenerationStatus.PROCESSING
 
 
 def test_claim_next_returns_effective_retry_stage_to_processor() -> None:
@@ -579,6 +619,148 @@ def test_mark_summarization_succeeded_upserts_summary_and_marks_done() -> None:
     assert update_params == {"meeting_id": meeting.id}
 
 
+def test_mark_summary_regeneration_succeeded_overwrites_existing_summary_and_marks_idle() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DONE,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+        summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+    )
+    summary = SummaryDraft(
+        overview="Replacement overview",
+        decisions=(SummaryDecisionDraft(text="Replacement decision"),),
+        action_items=(
+            SummaryActionItemDraft(
+                task="Follow up",
+                owner=SummaryActionItemOwnerDraft(kind="speaker", value="SPEAKER_00"),
+            ),
+        ),
+        open_questions=(SummaryOpenQuestionDraft(text="Replacement question?"),),
+    )
+
+    queue.mark_summary_regeneration_succeeded(meeting=meeting, summary=summary)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert len(statements) == 2
+    summary_sql, summary_params = statements[0]
+    assert summary_sql.startswith("update summaries")
+    assert "insert into summaries" not in summary_sql
+    assert "where meeting_id = %(meeting_id)s" in summary_sql
+    assert isinstance(summary_params, dict)
+    assert summary_params["meeting_id"] == meeting.id
+    assert summary_params["overview"] == "Replacement overview"
+    assert summary_params["decisions"].obj == [{"text": "Replacement decision"}]
+    assert summary_params["action_items"].obj == [
+        {"task": "Follow up", "owner": {"kind": "speaker", "value": "SPEAKER_00"}}
+    ]
+    assert summary_params["open_questions"].obj == [
+        {"text": "Replacement question?"}
+    ]
+    meeting_sql, meeting_params = statements[1]
+    assert meeting_sql == normalize_sql(MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL)
+    assert "status = 'done'" in meeting_sql
+    assert "summary_regeneration_status = 'idle'" in meeting_sql
+    assert "summary_regeneration_processing_started_at = null" in meeting_sql
+    assert meeting_params == {"meeting_id": meeting.id}
+
+
+def test_mark_summary_regeneration_succeeded_marks_failed_when_summary_row_is_missing() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[0, 1])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DONE,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+        summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+    )
+    summary = SummaryDraft(
+        overview="Replacement overview",
+        decisions=(),
+        action_items=(),
+        open_questions=(),
+    )
+
+    queue.mark_summary_regeneration_succeeded(meeting=meeting, summary=summary)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert len(statements) == 2
+    assert statements[0][0].startswith("update summaries")
+    assert statements[1] == (
+        normalize_sql(MARK_SUMMARY_REGENERATION_FAILED_SQL),
+        {"meeting_id": meeting.id},
+    )
+
+
+def test_mark_summary_regeneration_failed_marks_failed_without_touching_summary() -> None:
+    connection = RecordingConnection(row=None, rowcount=1)
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DONE,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+        summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+    )
+
+    queue.mark_summary_regeneration_failed(meeting)
+
+    statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
+    assert statements == [
+        (
+            normalize_sql(MARK_SUMMARY_REGENERATION_FAILED_SQL),
+            {"meeting_id": meeting.id},
+        )
+    ]
+    sql = statements[0][0]
+    assert "update summaries" not in sql
+    assert "status = 'done'" in sql
+    assert "summary_regeneration_status = 'failed'" in sql
+    assert "summary_regeneration_processing_started_at = null" in sql
+
+
+def test_summary_regeneration_terminal_writes_tolerate_deleted_rows() -> None:
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.DONE,
+        resume_from_stage=None,
+        transcription_progress=100,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+        summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+    )
+    summary = SummaryDraft(
+        overview="Replacement overview",
+        decisions=(),
+        action_items=(),
+        open_questions=(),
+    )
+    success_connection = RecordingConnection(row=None, rowcounts=[0, 0])
+    failure_connection = RecordingConnection(row=None, rowcount=0)
+
+    PostgresMeetingQueue(lambda: success_connection).mark_summary_regeneration_succeeded(
+        meeting=meeting,
+        summary=summary,
+    )
+    PostgresMeetingQueue(lambda: failure_connection).mark_summary_regeneration_failed(meeting)
+
+    assert len(success_connection.executed_statements) == 2
+    assert len(failure_connection.executed_statements) == 1
+
+
 def test_mark_summarization_succeeded_raises_when_final_status_update_misses() -> None:
     connection = RecordingConnection(row=None, rowcounts=[1, 0])
     queue = PostgresMeetingQueue(lambda: connection)
@@ -761,9 +943,21 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
         )
         admin.execute(
             """
+            create type summary_regeneration_status as enum (
+              'idle',
+              'pending',
+              'processing',
+              'failed'
+            )
+            """
+        )
+        admin.execute(
+            """
             create table meetings (
               id uuid primary key,
               status meeting_status not null,
+              summary_regeneration_status summary_regeneration_status not null default 'idle',
+              summary_regeneration_processing_started_at timestamptz,
               duration_seconds integer,
               resume_from_stage meeting_status,
               transcription_progress integer,
@@ -1059,9 +1253,21 @@ def test_real_postgres_claim_next_does_not_duplicate_pending_claim_before_proces
         )
         admin.execute(
             """
+            create type summary_regeneration_status as enum (
+              'idle',
+              'pending',
+              'processing',
+              'failed'
+            )
+            """
+        )
+        admin.execute(
+            """
             create table meetings (
               id uuid primary key,
               status meeting_status not null,
+              summary_regeneration_status summary_regeneration_status not null default 'idle',
+              summary_regeneration_processing_started_at timestamptz,
               resume_from_stage meeting_status,
               transcription_progress integer,
               error_kind text,
@@ -1132,9 +1338,21 @@ def test_real_postgres_claim_next_promotes_pending_retry_to_resume_stage() -> No
         )
         admin.execute(
             """
+            create type summary_regeneration_status as enum (
+              'idle',
+              'pending',
+              'processing',
+              'failed'
+            )
+            """
+        )
+        admin.execute(
+            """
             create table meetings (
               id uuid primary key,
               status meeting_status not null,
+              summary_regeneration_status summary_regeneration_status not null default 'idle',
+              summary_regeneration_processing_started_at timestamptz,
               resume_from_stage meeting_status,
               transcription_progress integer,
               error_kind text,
@@ -1241,9 +1459,21 @@ def test_real_postgres_skip_locked_claims_distinct_rows_when_database_available(
         )
         admin.execute(
             """
+            create type summary_regeneration_status as enum (
+              'idle',
+              'pending',
+              'processing',
+              'failed'
+            )
+            """
+        )
+        admin.execute(
+            """
             create table meetings (
               id uuid primary key,
               status meeting_status not null,
+              summary_regeneration_status summary_regeneration_status not null default 'idle',
+              summary_regeneration_processing_started_at timestamptz,
               resume_from_stage meeting_status,
               transcription_progress integer,
               error_kind text,

@@ -41,8 +41,10 @@ OpenRouter**, billed to a single company-owned API key.
 
 The integration lives behind a `Summarizer` interface in the Python worker.
 The interface accepts `(transcript: list[Segment], speaker_map: SpeakerMap)`
-and returns a validated `Summary`. Any code outside the worker's summarizer
-module must not know which model or which provider answered the call.
+and returns a validated `Summary`. Summary regeneration reuses this worker
+summarizer with the existing Transcript as input and raw speaker labels rather
+than current Speaker mappings. Any code outside the worker's summarizer module
+must not know which model or which provider answered the call.
 
 OpenRouter is chosen over direct provider APIs because:
 

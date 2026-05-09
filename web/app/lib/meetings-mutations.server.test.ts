@@ -6,12 +6,273 @@ import { removeMeetingDirectory } from "./meeting-storage.server";
 import {
   deleteMeetingAndArtifacts,
   MeetingMutationError,
+  regenerateSummary,
   retryMeeting,
   saveSpeakerMapping,
   updateMeetingTitle,
 } from "./meetings-mutations.server";
 
 const meetingId = "00000000-0000-4000-8000-000000000006";
+
+describe("summary regeneration mutations", () => {
+  test("queues regeneration for a done meeting with an existing summary", async () => {
+    const queuedMeetings: string[] = [];
+
+    const result = await regenerateSummary(
+      { meetingId },
+      {
+        findMeetingSummaryRegenerationById: async (id) => ({
+          id,
+          status: "done",
+          summaryRegenerationStatus: "idle",
+          hasSummary: true,
+        }),
+        queueSummaryRegenerationById: async (id) => {
+          queuedMeetings.push(id);
+          return { id };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId });
+    expect(queuedMeetings).toEqual([meetingId]);
+  });
+
+  test("notifies the pending queue in the same transaction when regeneration is persisted", async () => {
+    const statements: string[] = [];
+    let transactionWasOpened = false;
+
+    mock.module("~/db/client.server", () => ({
+      sqlClient: {
+        begin: async (
+          callback: (
+            sql: (
+              strings: TemplateStringsArray,
+              ...values: unknown[]
+            ) => Promise<Array<{ id: string }>>,
+          ) => Promise<unknown>,
+        ) => {
+          transactionWasOpened = true;
+
+          return callback(async (strings, ...values) => {
+            statements.push(
+              `${Array.from(strings).join("?")} :: ${values.join(",")}`,
+            );
+
+            if (Array.from(strings).join(" ").includes("returning")) {
+              return [{ id: meetingId }];
+            }
+
+            return [];
+          });
+        },
+      },
+    }));
+
+    const result = await regenerateSummary(
+      { meetingId },
+      {
+        findMeetingSummaryRegenerationById: async (id) => ({
+          id,
+          status: "done",
+          summaryRegenerationStatus: "idle",
+          hasSummary: true,
+        }),
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId });
+    expect(transactionWasOpened).toBe(true);
+    expect(
+      statements.some((statement) => statement.includes("update meetings")),
+    ).toBe(true);
+    expect(
+      statements.some((statement) =>
+        statement.includes("summary_regeneration_status = 'pending'"),
+      ),
+    ).toBe(true);
+    expect(
+      statements.some((statement) =>
+        statement.includes("summary_regeneration_processing_started_at = null"),
+      ),
+    ).toBe(true);
+    expect(
+      statements.some((statement) => statement.includes("updated_at = now()")),
+    ).toBe(true);
+    expect(
+      statements.some((statement) =>
+        statement.includes("pg_notify('meetings_pending'"),
+      ),
+    ).toBe(true);
+  });
+
+  test("allows a failed regeneration state to be queued again", async () => {
+    const queuedMeetings: string[] = [];
+
+    const result = await regenerateSummary(
+      { meetingId },
+      {
+        findMeetingSummaryRegenerationById: async (id) => ({
+          id,
+          status: "done",
+          summaryRegenerationStatus: "failed",
+          hasSummary: true,
+        }),
+        queueSummaryRegenerationById: async (id) => {
+          queuedMeetings.push(id);
+          return { id };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId });
+    expect(queuedMeetings).toEqual([meetingId]);
+  });
+
+  test("rejects invalid and missing meetings before queueing regeneration", async () => {
+    let findWasCalled = false;
+    let queueWasCalled = false;
+
+    const invalidIdError = await captureMeetingMutationError(
+      regenerateSummary(
+        { meetingId: "not-a-uuid" },
+        {
+          findMeetingSummaryRegenerationById: async () => {
+            findWasCalled = true;
+            return null;
+          },
+          queueSummaryRegenerationById: async () => {
+            queueWasCalled = true;
+            return { id: meetingId };
+          },
+        },
+      ),
+    );
+
+    const missingMeetingError = await captureMeetingMutationError(
+      regenerateSummary(
+        { meetingId },
+        {
+          findMeetingSummaryRegenerationById: async () => null,
+          queueSummaryRegenerationById: async () => {
+            queueWasCalled = true;
+            return { id: meetingId };
+          },
+        },
+      ),
+    );
+
+    expect(invalidIdError.status).toBe(404);
+    expect(missingMeetingError.status).toBe(404);
+    expect(findWasCalled).toBe(false);
+    expect(queueWasCalled).toBe(false);
+  });
+
+  test("rejects meetings that are not done or do not have an existing summary", async () => {
+    const inputs = [
+      {
+        status: "summarizing" as const,
+        summaryRegenerationStatus: "idle" as const,
+        hasSummary: true,
+        message: "Only completed meetings can regenerate summaries.",
+      },
+      {
+        status: "done" as const,
+        summaryRegenerationStatus: "idle" as const,
+        hasSummary: false,
+        message:
+          "Only meetings with an existing summary can regenerate summaries.",
+      },
+    ];
+
+    for (const input of inputs) {
+      let queueWasCalled = false;
+      const error = await captureMeetingMutationError(
+        regenerateSummary(
+          { meetingId },
+          {
+            findMeetingSummaryRegenerationById: async (id) => ({
+              id,
+              status: input.status,
+              summaryRegenerationStatus: input.summaryRegenerationStatus,
+              hasSummary: input.hasSummary,
+            }),
+            queueSummaryRegenerationById: async () => {
+              queueWasCalled = true;
+              return { id: meetingId };
+            },
+          },
+        ),
+      );
+
+      expect(error.status).toBe(400);
+      expect(error.message).toBe(input.message);
+      expect(queueWasCalled).toBe(false);
+    }
+  });
+
+  test("returns the current validation error when queueing loses a race", async () => {
+    const observedStates: Array<"idle" | "pending"> = ["idle", "pending"];
+
+    const error = await captureMeetingMutationError(
+      regenerateSummary(
+        { meetingId },
+        {
+          findMeetingSummaryRegenerationById: async (id) => {
+            const summaryRegenerationStatus = observedStates.shift();
+
+            if (summaryRegenerationStatus === undefined) {
+              throw new Error("unexpected extra regeneration state lookup");
+            }
+
+            return {
+              id,
+              status: "done",
+              summaryRegenerationStatus,
+              hasSummary: true,
+            };
+          },
+          queueSummaryRegenerationById: async () => null,
+        },
+      ),
+    );
+
+    expect(error.status).toBe(400);
+    expect(error.message).toBe("Summary regeneration is already in progress.");
+  });
+
+  test("rejects meetings with active summary regeneration", async () => {
+    for (const summaryRegenerationStatus of [
+      "pending",
+      "processing",
+    ] as const) {
+      let queueWasCalled = false;
+      const error = await captureMeetingMutationError(
+        regenerateSummary(
+          { meetingId },
+          {
+            findMeetingSummaryRegenerationById: async (id) => ({
+              id,
+              status: "done",
+              summaryRegenerationStatus,
+              hasSummary: true,
+            }),
+            queueSummaryRegenerationById: async () => {
+              queueWasCalled = true;
+              return { id: meetingId };
+            },
+          },
+        ),
+      );
+
+      expect(error.status).toBe(400);
+      expect(error.message).toBe(
+        "Summary regeneration is already in progress.",
+      );
+      expect(queueWasCalled).toBe(false);
+    }
+  });
+});
 
 describe("speaker mapping mutations", () => {
   test("trims and upserts a speaker mapping scoped to one meeting", async () => {

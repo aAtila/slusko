@@ -23,6 +23,8 @@ function detailRow(
     failedAtStage: "normalizing",
     createdAt: new Date("2026-05-05T10:00:00.000Z"),
     updatedAt: new Date("2026-05-05T10:02:00.000Z"),
+    summaryRegenerationStatus: "idle",
+    summaryRegenerationProcessingStartedAt: null,
     ...overrides,
   };
 }
@@ -75,6 +77,29 @@ describe("meeting detail loader helpers", () => {
       failedAtStage: "normalizing",
       createdAt: "2026-05-05T10:00:00.000Z",
       updatedAt: "2026-05-05T10:02:00.000Z",
+      summaryRegenerationStatus: "idle",
+      summaryRegenerationProcessingStartedAt: null,
+    });
+  });
+
+  test("serializes active summary regeneration processing state", async () => {
+    const meeting = await loadMeetingDetail(meetingId, {
+      findMeetingById: async (id) =>
+        id === meetingId
+          ? detailRow({
+              status: "done",
+              summaryRegenerationStatus: "processing",
+              summaryRegenerationProcessingStartedAt: new Date(
+                "2026-05-05T10:04:00.000Z",
+              ),
+            })
+          : null,
+    });
+
+    expect(meeting).toMatchObject({
+      status: "done",
+      summaryRegenerationStatus: "processing",
+      summaryRegenerationProcessingStartedAt: "2026-05-05T10:04:00.000Z",
     });
   });
 

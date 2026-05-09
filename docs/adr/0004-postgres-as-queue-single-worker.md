@@ -34,14 +34,21 @@ Mechanics:
 
 - Web inserts a row into `meetings` with `status='pending'` and issues
   `NOTIFY meetings_pending` in the same transaction.
+- Post-completion Summary regeneration keeps the Meeting `done` and tracks only
+  the current regeneration lifecycle on the Meeting row. It uses the same
+  wake-up notification channel as the Meeting pipeline.
 - The Python worker holds an open `LISTEN meetings_pending` connection. On
   notification it claims the next pending row using `SELECT ... FOR UPDATE
   SKIP LOCKED` and processes it.
-- On worker startup, it scans for `status IN ('pending', 'processing')`
-  rows to resume any work interrupted by a restart.
-- Status transitions and progress fields are written back to the same row.
-- The web UI reads status from the same table — no separate "live job
-  state" store to desync against.
+- On worker startup, it scans for resumable Meeting rows and pending/stale
+  Summary regeneration work to resume any work interrupted by a restart.
+- Status transitions and progress fields are written back to the row that owns
+  that lifecycle.
+- The web UI reads job state from Postgres — no separate "live job state" store
+  to desync against.
+- Meeting pipeline jobs have priority over post-completion Summary regeneration,
+  preserving the original product promise that uploaded Meetings continue moving
+  through the processing pipeline first.
 
 We will hand-roll this in ~50–100 lines of Python rather than pull in a
 queue library. If it gets noticeably gnarlier, **`procrastinate`** is the

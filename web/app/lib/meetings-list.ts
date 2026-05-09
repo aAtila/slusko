@@ -4,6 +4,7 @@ import type {
   SummaryActionItem,
   SummaryDecision,
   SummaryOpenQuestion,
+  SummaryRegenerationStatus,
 } from "~/db/schema";
 
 export type MeetingFailureFields = {
@@ -23,6 +24,8 @@ export type HomeMeetingListItem = MeetingFailureFields & {
 
 export type MeetingDetail = HomeMeetingListItem & {
   updatedAt: string;
+  summaryRegenerationStatus: SummaryRegenerationStatus;
+  summaryRegenerationProcessingStartedAt: string | null;
 };
 
 export type TranscriptSegment = {

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import type { MeetingStatus } from "~/db/schema";
+import type { MeetingStatus, SummaryRegenerationStatus } from "~/db/schema";
 import type {
   MeetingDetail,
   MeetingSummary,
@@ -11,7 +11,10 @@ import type {
 } from "~/lib/meetings-list";
 import {
   ErrorBlock,
+  getObservedSummaryRegenerationNotice,
   MeetingExportsPanel,
+  ProcessingPanel,
+  shouldPollMeetingDetail,
   SummaryPanel,
   TranscriptPanel,
 } from "./meetings.$meetingId";
@@ -35,23 +38,67 @@ function renderTranscriptPanel({
 }
 
 function renderSummaryPanel({
+  isRegenerateSubmitting = false,
+  regenerationActionError,
+  regenerationNotice,
+  regenerationStatus = "idle",
   speakerMap = {},
   summary,
   status,
 }: {
+  isRegenerateSubmitting?: boolean;
+  regenerationActionError?: string | null;
+  regenerationNotice?: Parameters<typeof SummaryPanel>[0]["regenerationNotice"];
+  regenerationStatus?: SummaryRegenerationStatus;
   speakerMap?: SpeakerMap;
   summary: MeetingSummary | null;
   status: MeetingStatus;
 }) {
-  return renderToStaticMarkup(
-    <SummaryPanel speakerMap={speakerMap} summary={summary} status={status} />,
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/",
+        element: (
+          <SummaryPanel
+            isRegenerateSubmitting={isRegenerateSubmitting}
+            regenerationActionError={regenerationActionError}
+            regenerationNotice={regenerationNotice}
+            regenerationStatus={regenerationStatus}
+            speakerMap={speakerMap}
+            summary={summary}
+            status={status}
+          />
+        ),
+      },
+    ],
+    { initialEntries: ["/"] },
   );
+
+  return renderToStaticMarkup(<RouterProvider router={router} />);
 }
 
 function renderMeetingExportsPanel(
   meetingId = "00000000-0000-4000-8000-000000000123",
 ) {
   return renderToStaticMarkup(<MeetingExportsPanel meetingId={meetingId} />);
+}
+
+function renderProcessingPanel({
+  failedAtStage = null,
+  progress = null,
+  status,
+}: {
+  failedAtStage?: MeetingStatus | null;
+  progress?: number | null;
+  status: MeetingStatus;
+}) {
+  return renderToStaticMarkup(
+    <ProcessingPanel
+      failedAtStage={failedAtStage}
+      progress={progress}
+      status={status}
+    />,
+  );
 }
 
 function meeting(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
@@ -66,6 +113,8 @@ function meeting(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
     failedAtStage: "diarizing",
     createdAt: "2026-05-05T10:00:00.000Z",
     updatedAt: "2026-05-05T10:05:00.000Z",
+    summaryRegenerationStatus: "idle",
+    summaryRegenerationProcessingStartedAt: null,
     ...overrides,
   };
 }
@@ -165,7 +214,175 @@ describe("ErrorBlock", () => {
   });
 });
 
+const savedSummary: MeetingSummary = {
+  overview: "Team aligned on release readiness.",
+  decisions: [{ text: "Ship on Friday." }],
+  actionItems: [
+    {
+      task: "Publish release notes",
+      owner: { kind: "name", value: "Atila" },
+    },
+  ],
+  openQuestions: [{ text: "Should we include optional migration docs?" }],
+  updatedAt: "2026-05-07T20:00:00.000Z",
+};
+
+describe("summary regeneration observed notices", () => {
+  test("reports success only after active regeneration returns to idle", () => {
+    expect(getObservedSummaryRegenerationNotice("pending", "idle")).toEqual({
+      message: "Summary regenerated.",
+      tone: "success",
+    });
+    expect(getObservedSummaryRegenerationNotice("processing", "idle")).toEqual({
+      message: "Summary regenerated.",
+      tone: "success",
+    });
+  });
+
+  test("reports failure only after active regeneration transitions to failed", () => {
+    expect(getObservedSummaryRegenerationNotice("pending", "failed")).toEqual({
+      message:
+        "Could not regenerate summary. The previous summary is unchanged.",
+      tone: "danger",
+    });
+    expect(
+      getObservedSummaryRegenerationNotice("processing", "failed"),
+    ).toEqual({
+      message:
+        "Could not regenerate summary. The previous summary is unchanged.",
+      tone: "danger",
+    });
+  });
+
+  test("does not show stale failed feedback on initial or non-active observations", () => {
+    expect(
+      getObservedSummaryRegenerationNotice(undefined, "failed"),
+    ).toBeNull();
+    expect(getObservedSummaryRegenerationNotice("failed", "failed")).toBeNull();
+    expect(getObservedSummaryRegenerationNotice("idle", "failed")).toBeNull();
+  });
+});
+
 describe("SummaryPanel", () => {
+  test("shows regenerate action only for done meetings with a summary", () => {
+    const doneWithSummaryMarkup = renderSummaryPanel({
+      status: "done",
+      summary: savedSummary,
+    });
+
+    expect(doneWithSummaryMarkup).toContain("Regenerate summary");
+    expect(doneWithSummaryMarkup).toContain('value="regenerate-summary"');
+
+    expect(
+      renderSummaryPanel({ status: "summarizing", summary: savedSummary }),
+    ).not.toContain("Regenerate summary");
+    expect(renderSummaryPanel({ status: "done", summary: null })).not.toContain(
+      "Regenerate summary",
+    );
+  });
+
+  test("confirms regeneration with exact replacement warning", () => {
+    const source = readFileSync(
+      new URL("./meetings.$meetingId.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain(
+      "Regenerate this summary? The current summary will be replaced if regeneration succeeds.",
+    );
+  });
+
+  test("disables regenerate action while regeneration is active or submitting", () => {
+    for (const regenerationStatus of ["pending", "processing"] as const) {
+      const markup = renderSummaryPanel({
+        regenerationStatus,
+        status: "done",
+        summary: savedSummary,
+      });
+
+      expect(markup).toContain("Regenerating…");
+      expect(markup).toContain('disabled=""');
+      expect(markup).toContain("Team aligned on release readiness.");
+    }
+
+    const submittingMarkup = renderSummaryPanel({
+      isRegenerateSubmitting: true,
+      status: "done",
+      summary: savedSummary,
+    });
+
+    expect(submittingMarkup).toContain("Regenerating…");
+    expect(submittingMarkup).toContain('disabled=""');
+    expect(submittingMarkup).toContain("Team aligned on release readiness.");
+  });
+
+  test("polls the detail route every five seconds while summary regeneration is active", () => {
+    expect(shouldPollMeetingDetail("done", "pending")).toBe(true);
+    expect(shouldPollMeetingDetail("done", "processing")).toBe(true);
+    expect(shouldPollMeetingDetail("done", "idle")).toBe(false);
+    expect(shouldPollMeetingDetail("done", "failed")).toBe(false);
+    expect(shouldPollMeetingDetail("summarizing", "idle")).toBe(true);
+
+    const source = readFileSync(
+      new URL("./meetings.$meetingId.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("shouldPollMeetingDetail(");
+    expect(source).toContain("window.setInterval");
+    expect(source).toContain("5_000");
+  });
+
+  test("keeps the processing panel in its completed state for done meetings", () => {
+    const markup = renderProcessingPanel({ status: "done" });
+
+    expect(markup).toContain("Processing");
+    expect(markup).toContain("Normalize audio");
+    expect(markup).toContain("Transcribe");
+    expect(markup).toContain("Identify speakers");
+    expect(markup).toContain("Summarize");
+    expect(markup).not.toContain("Queued");
+    expect(markup).not.toContain("Generating transcript");
+    expect(markup).not.toContain("Extracting key moments");
+  });
+
+  test("renders regeneration notices without replacing the saved summary", () => {
+    const successMarkup = renderSummaryPanel({
+      regenerationNotice: { message: "Summary regenerated.", tone: "success" },
+      status: "done",
+      summary: savedSummary,
+    });
+
+    expect(successMarkup).toContain("Summary regenerated.");
+    expect(successMarkup).toContain("Team aligned on release readiness.");
+
+    const failureMarkup = renderSummaryPanel({
+      regenerationNotice: {
+        message:
+          "Could not regenerate summary. The previous summary is unchanged.",
+        tone: "danger",
+      },
+      status: "done",
+      summary: savedSummary,
+    });
+
+    expect(failureMarkup).toContain(
+      "Could not regenerate summary. The previous summary is unchanged.",
+    );
+    expect(failureMarkup).toContain("Team aligned on release readiness.");
+  });
+
+  test("renders regenerate action errors from action data", () => {
+    const markup = renderSummaryPanel({
+      regenerationActionError: "A regeneration is already queued.",
+      status: "done",
+      summary: savedSummary,
+    });
+
+    expect(markup).toContain("A regeneration is already queued.");
+    expect(markup).toContain("Team aligned on release readiness.");
+  });
+
   test("renders overview, decisions, action items, and open questions read-only", () => {
     const markup = renderSummaryPanel({
       status: "done",
@@ -199,7 +416,6 @@ describe("SummaryPanel", () => {
     expect(markup).toContain("Owner: Unassigned");
     expect(markup).toContain("Open questions");
     expect(markup).toContain("Should we include optional migration docs?");
-    expect(markup).not.toContain("<input");
     expect(markup).not.toContain("<textarea");
     expect(markup).not.toContain("contenteditable");
   });

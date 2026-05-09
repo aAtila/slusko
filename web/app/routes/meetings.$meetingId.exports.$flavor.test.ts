@@ -17,6 +17,8 @@ function buildRouteData(): MeetingDetailRouteData {
       failedAtStage: null,
       createdAt: "2026-05-05T10:00:00.000Z",
       updatedAt: "2026-05-05T10:02:00.000Z",
+      summaryRegenerationStatus: "idle",
+      summaryRegenerationProcessingStartedAt: null,
     },
     summary: {
       overview: "SPEAKER_00 aligned with SPEAKER_01 on priorities.",
@@ -86,6 +88,34 @@ describe("meeting export resource route", () => {
       'attachment; filename="2026-05-05-weekly-sync.md"',
     );
     expect(await response.text()).toContain("## Transcript");
+  });
+
+  test("exports the current summary while regeneration is active", async () => {
+    const data = buildRouteData();
+    data.meeting.summaryRegenerationStatus = "processing";
+    data.meeting.summaryRegenerationProcessingStartedAt =
+      "2026-05-05T11:05:00.000Z";
+    const summary = data.summary;
+    if (summary === null) {
+      throw new Error("Expected test fixture to include a summary");
+    }
+    data.summary = {
+      ...summary,
+      overview: "Current summary remains exportable during regeneration.",
+    };
+
+    const loader = createMeetingExportResourceLoader({
+      loadMeetingDetailRouteData: async () => data,
+    });
+
+    const response = await loader({
+      params: { meetingId, flavor: "summary" },
+      request: new Request("http://localhost/meetings/x/exports/summary"),
+    });
+
+    expect(await response.text()).toContain(
+      "Current summary remains exportable during regeneration.",
+    );
   });
 
   test("throws 404 for invalid export flavor", async () => {

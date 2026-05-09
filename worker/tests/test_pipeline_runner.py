@@ -9,6 +9,7 @@ from slusko_worker.db.models import (
     MeetingStatus,
     QueuedMeeting,
     SummaryDraft,
+    SummaryRegenerationStatus,
     TranscriptSegmentDraft,
 )
 from slusko_worker.pipeline.errors import (
@@ -24,7 +25,11 @@ from slusko_worker.pipeline.runner import PipelineProcessor
 MEETING_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
-def queued_meeting(status: MeetingStatus = MeetingStatus.PENDING) -> QueuedMeeting:
+def queued_meeting(
+    status: MeetingStatus = MeetingStatus.PENDING,
+    *,
+    summary_regeneration_status: SummaryRegenerationStatus = SummaryRegenerationStatus.IDLE,
+) -> QueuedMeeting:
     return QueuedMeeting(
         id=MEETING_ID,
         status=status,
@@ -33,6 +38,7 @@ def queued_meeting(status: MeetingStatus = MeetingStatus.PENDING) -> QueuedMeeti
         error_kind=None,
         error_message=None,
         failed_at_stage=None,
+        summary_regeneration_status=summary_regeneration_status,
     )
 
 
@@ -95,6 +101,14 @@ class FakeQueue:
         self, *, meeting: QueuedMeeting, summary: SummaryDraft
     ) -> None:
         self.events.append(("summarization_succeeded", meeting.id, summary))
+
+    def mark_summary_regeneration_succeeded(
+        self, *, meeting: QueuedMeeting, summary: SummaryDraft
+    ) -> None:
+        self.events.append(("summary_regeneration_succeeded", meeting.id, summary))
+
+    def mark_summary_regeneration_failed(self, meeting: QueuedMeeting) -> None:
+        self.events.append(("summary_regeneration_failed", meeting.id))
 
     def mark_failure(
         self,
@@ -621,6 +635,106 @@ def test_summarizing_reentry_loads_existing_transcript_and_finishes_without_reru
         ("summarization_started", MEETING_ID),
         ("summarize", MEETING_ID, loaded_segments),
         ("summarization_succeeded", MEETING_ID, summary),
+    ]
+
+
+def test_summary_regeneration_reuses_raw_transcript_and_overwrites_current_summary() -> None:
+    queue = FakeQueue()
+    raw_segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.0,
+            speaker_label="SPEAKER_00",
+            text="Raw transcript label, not mapped name",
+        )
+    ]
+    queue.transcript_segments = raw_segments
+    summary = SummaryDraft(
+        overview="Regenerated overview",
+        decisions=(),
+        action_items=(),
+        open_questions=(),
+    )
+    normalizer = FakeNormalizer(FakeNormalizationResult(duration_seconds=42))
+    transcriber = FakeTranscriber(shared_events=queue.events)
+    diarizer = FakeDiarizer(shared_events=queue.events)
+    summarizer = FakeSummarizer(summary=summary, shared_events=queue.events)
+    processor = make_processor(
+        queue=queue,
+        normalizer=normalizer,
+        transcriber=transcriber,
+        diarizer=diarizer,
+        summarizer=summarizer,
+    )
+
+    processor.process(
+        queued_meeting(
+            MeetingStatus.DONE,
+            summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+        )
+    )
+
+    assert normalizer.events == []
+    assert transcriber.events == []
+    assert diarizer.events == []
+    assert queue.events == [
+        ("load_transcript_segments", MEETING_ID),
+        ("summarize", MEETING_ID, raw_segments),
+        ("summary_regeneration_succeeded", MEETING_ID, summary),
+    ]
+
+
+def test_summary_regeneration_failure_preserves_existing_summary_and_marks_failed() -> None:
+    queue = FakeQueue()
+    raw_segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.0,
+            speaker_label="SPEAKER_00",
+            text="Raw transcript label",
+        )
+    ]
+    queue.transcript_segments = raw_segments
+    summarizer = FakeSummarizer(
+        error=SummarizationFailed("OpenRouter rejected regeneration"),
+        shared_events=queue.events,
+    )
+    processor = make_processor(queue=queue, summarizer=summarizer)
+
+    processor.process(
+        queued_meeting(
+            MeetingStatus.DONE,
+            summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+        )
+    )
+
+    assert queue.events == [
+        ("load_transcript_segments", MEETING_ID),
+        ("summarize", MEETING_ID, raw_segments),
+        ("summary_regeneration_failed", MEETING_ID),
+    ]
+
+
+def test_summary_regeneration_transcript_load_failure_marks_regeneration_failed() -> None:
+    queue = FakeQueue()
+
+    def load_transcript_segments(meeting: QueuedMeeting) -> list[TranscriptSegmentDraft]:
+        queue.events.append(("load_transcript_segments", meeting.id))
+        raise RuntimeError("meeting rows disappeared")
+
+    queue.load_transcript_segments = load_transcript_segments  # type: ignore[method-assign]
+    processor = make_processor(queue=queue)
+
+    processor.process(
+        queued_meeting(
+            MeetingStatus.DONE,
+            summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+        )
+    )
+
+    assert queue.events == [
+        ("load_transcript_segments", MEETING_ID),
+        ("summary_regeneration_failed", MEETING_ID),
     ]
 
 

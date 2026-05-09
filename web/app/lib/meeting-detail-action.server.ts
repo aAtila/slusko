@@ -1,10 +1,12 @@
 import {
   deleteMeetingAndArtifacts,
   MeetingMutationError,
+  regenerateSummary,
   retryMeeting,
   saveSpeakerMapping,
   updateMeetingTitle,
   type DeleteMeetingResult,
+  type RegenerateSummaryResult,
   type RetryMeetingResult,
   type SaveSpeakerMappingResult,
   type UpdateMeetingTitleResult,
@@ -12,12 +14,14 @@ import {
 
 type MeetingDetailActionIntent =
   | "delete-meeting"
+  | "regenerate-summary"
   | "retry-meeting"
   | "save-speaker-mapping"
   | "update-title";
 
 export type MeetingDetailActionData =
   | { ok: true; intent: "update-title"; title: string }
+  | { ok: true; intent: "regenerate-summary" }
   | {
       ok: true;
       intent: "retry-meeting";
@@ -56,6 +60,9 @@ type MeetingDetailActionHandlers = {
   retryMeeting?: (input: {
     meetingId: string | undefined;
   }) => Promise<RetryMeetingResult>;
+  regenerateSummary?: (input: {
+    meetingId: string | undefined;
+  }) => Promise<RegenerateSummaryResult>;
 };
 
 export async function handleMeetingDetailAction(
@@ -115,6 +122,17 @@ export async function handleMeetingDetailAction(
           intent: "retry-meeting",
           resumeFromStage: result.resumeFromStage,
         },
+      };
+    }
+
+    if (intent === "regenerate-summary") {
+      await (handlers.regenerateSummary ?? regenerateSummary)({
+        meetingId: input.meetingId,
+      });
+
+      return {
+        type: "data",
+        data: { ok: true, intent: "regenerate-summary" },
       };
     }
 
@@ -188,6 +206,18 @@ export async function handleMeetingDetailAction(
       };
     }
 
+    if (intent === "regenerate-summary") {
+      return {
+        type: "data",
+        data: {
+          ok: false,
+          intent: "regenerate-summary",
+          error: "Could not queue summary regeneration. Please try again.",
+        },
+        status: 500,
+      };
+    }
+
     throw error;
   }
 }
@@ -197,6 +227,7 @@ function isMeetingDetailActionIntent(
 ): intent is MeetingDetailActionIntent {
   return (
     intent === "delete-meeting" ||
+    intent === "regenerate-summary" ||
     intent === "retry-meeting" ||
     intent === "save-speaker-mapping" ||
     intent === "update-title"

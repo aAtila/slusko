@@ -8,6 +8,7 @@ recording failures.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -23,6 +24,15 @@ class MeetingStatus(StrEnum):
     SUMMARIZING = "summarizing"
     DONE = "done"
     ERROR = "error"
+
+
+class SummaryRegenerationStatus(StrEnum):
+    """Values mirrored from web/app/db/schema.ts summary_regeneration_status."""
+
+    IDLE = "idle"
+    PENDING = "pending"
+    PROCESSING = "processing"
+    FAILED = "failed"
 
 
 class ErrorKind(StrEnum):
@@ -111,3 +121,7 @@ class QueuedMeeting:
     error_kind: ErrorKind | None
     error_message: str | None
     failed_at_stage: MeetingStatus | None
+    summary_regeneration_status: SummaryRegenerationStatus = (
+        SummaryRegenerationStatus.IDLE
+    )
+    summary_regeneration_processing_started_at: datetime | None = None

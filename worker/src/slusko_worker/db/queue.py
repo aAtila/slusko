@@ -18,6 +18,7 @@ from slusko_worker.db.models import (
     SummaryDecisionDraft,
     SummaryDraft,
     SummaryOpenQuestionDraft,
+    SummaryRegenerationStatus,
     TranscriptSegmentDraft,
 )
 
@@ -36,7 +37,7 @@ NON_TERMINAL_STATUSES: tuple[MeetingStatus, ...] = (
 RECOVERY_RECLAIM_INTERVAL_SQL = "5 minutes"
 
 CLAIM_NEXT_MEETING_SQL = f"""
-with candidate as (
+with pipeline_candidate as (
   select
     id,
     status as claimed_status,
@@ -44,7 +45,9 @@ with candidate as (
     transcription_progress,
     error_kind,
     error_message,
-    failed_at_stage
+    failed_at_stage,
+    summary_regeneration_status,
+    summary_regeneration_processing_started_at
   from meetings
   where status = 'pending'
     or (
@@ -59,6 +62,34 @@ with candidate as (
   order by created_at asc
   for update skip locked
   limit 1
+), regeneration_candidate as (
+  select
+    id,
+    status as claimed_status,
+    resume_from_stage,
+    transcription_progress,
+    error_kind,
+    error_message,
+    failed_at_stage,
+    summary_regeneration_status,
+    summary_regeneration_processing_started_at
+  from meetings
+  where not exists (select 1 from pipeline_candidate)
+    and status = 'done'
+    and (
+      summary_regeneration_status = 'pending'
+      or (
+        summary_regeneration_status = 'processing'
+        and summary_regeneration_processing_started_at < now() - interval '{RECOVERY_RECLAIM_INTERVAL_SQL}'
+      )
+    )
+  order by created_at asc
+  for update skip locked
+  limit 1
+), candidate as (
+  select * from pipeline_candidate
+  union all
+  select * from regeneration_candidate
 ), claimed as (
   update meetings as meeting
   set
@@ -75,6 +106,8 @@ with candidate as (
         then 'normalizing'::meeting_status
       else meeting.status
     end,
+    summary_regeneration_status = case when candidate.claimed_status = 'done' then 'processing'::summary_regeneration_status else meeting.summary_regeneration_status end,
+    summary_regeneration_processing_started_at = case when candidate.claimed_status = 'done' then now() else meeting.summary_regeneration_processing_started_at end,
     resume_from_stage = null,
     transcription_progress = case when candidate.claimed_status = 'pending' then null else meeting.transcription_progress end,
     error_kind = case when candidate.claimed_status = 'pending' then null else meeting.error_kind end,
@@ -100,7 +133,9 @@ with candidate as (
     case when candidate.claimed_status = 'pending' then null else candidate.transcription_progress end as transcription_progress,
     case when candidate.claimed_status = 'pending' then null else candidate.error_kind end as error_kind,
     case when candidate.claimed_status = 'pending' then null else candidate.error_message end as error_message,
-    case when candidate.claimed_status = 'pending' then null else candidate.failed_at_stage end as failed_at_stage
+    case when candidate.claimed_status = 'pending' then null else candidate.failed_at_stage end as failed_at_stage,
+    meeting.summary_regeneration_status,
+    meeting.summary_regeneration_processing_started_at
 )
 select * from claimed
 """
@@ -255,6 +290,17 @@ set
   updated_at = now()
 """
 
+UPDATE_SUMMARY_SQL = """
+update summaries
+set
+  overview = %(overview)s,
+  decisions = %(decisions)s,
+  action_items = %(action_items)s,
+  open_questions = %(open_questions)s,
+  updated_at = now()
+where meeting_id = %(meeting_id)s
+"""
+
 MARK_SUMMARIZATION_SUCCEEDED_SQL = """
 update meetings
 set
@@ -267,6 +313,28 @@ set
   updated_at = now()
 where id = %(meeting_id)s
   and status = 'summarizing'
+"""
+
+MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL = """
+update meetings
+set
+  summary_regeneration_status = 'idle',
+  summary_regeneration_processing_started_at = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'done'
+  and summary_regeneration_status = 'processing'
+"""
+
+MARK_SUMMARY_REGENERATION_FAILED_SQL = """
+update meetings
+set
+  summary_regeneration_status = 'failed',
+  summary_regeneration_processing_started_at = null,
+  updated_at = now()
+where id = %(meeting_id)s
+  and status = 'done'
+  and summary_regeneration_status = 'processing'
 """
 
 MARK_FAILURE_SQL = """
@@ -470,6 +538,43 @@ class PostgresMeetingQueue:
                             f"meeting status write updated {cursor.rowcount} rows"
                         )
 
+    def mark_summary_regeneration_succeeded(
+        self,
+        *,
+        meeting: QueuedMeeting,
+        summary: SummaryDraft,
+    ) -> None:
+        """Overwrite the current summary and finish regeneration if rows still exist."""
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        UPDATE_SUMMARY_SQL,
+                        _summary_params(meeting=meeting, summary=summary),
+                    )
+                    if cursor.rowcount == 1:
+                        cursor.execute(
+                            MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL,
+                            {"meeting_id": meeting.id},
+                        )
+                    else:
+                        cursor.execute(
+                            MARK_SUMMARY_REGENERATION_FAILED_SQL,
+                            {"meeting_id": meeting.id},
+                        )
+
+    def mark_summary_regeneration_failed(self, meeting: QueuedMeeting) -> None:
+        """Mark regeneration failed without changing the normal Meeting lifecycle."""
+
+        with self._connection_factory() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        MARK_SUMMARY_REGENERATION_FAILED_SQL,
+                        {"meeting_id": meeting.id},
+                    )
+
     def mark_recovery_not_implemented(self, meeting: QueuedMeeting) -> None:
         """Terminal-error a claimed later-stage row at a safe boundary for this slice."""
 
@@ -587,6 +692,12 @@ def _meeting_from_row(row: dict[str, object]) -> QueuedMeeting:
         error_kind=_maybe_error_kind(row["error_kind"]),
         error_message=row["error_message"],
         failed_at_stage=_maybe_status(row["failed_at_stage"]),
+        summary_regeneration_status=_maybe_summary_regeneration_status(
+            row.get("summary_regeneration_status")
+        ),
+        summary_regeneration_processing_started_at=row.get(
+            "summary_regeneration_processing_started_at"
+        ),
     )
 
 
@@ -609,6 +720,12 @@ def _maybe_error_kind(value: object) -> ErrorKind | None:
     if value is None:
         return None
     return ErrorKind(value)
+
+
+def _maybe_summary_regeneration_status(value: object) -> SummaryRegenerationStatus:
+    if value is None:
+        return SummaryRegenerationStatus.IDLE
+    return SummaryRegenerationStatus(value)
 
 
 def _failed_stage_for_stub(status: MeetingStatus) -> MeetingStatus:

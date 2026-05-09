@@ -12,6 +12,7 @@ from slusko_worker.db.models import (
     MeetingStatus,
     QueuedMeeting,
     SummaryDraft,
+    SummaryRegenerationStatus,
     TranscriptSegmentDraft,
 )
 from slusko_worker.pipeline.errors import PipelineError
@@ -54,6 +55,12 @@ class PipelineQueue(RecoveryQueue, Protocol):
     def mark_summarization_succeeded(
         self, *, meeting: QueuedMeeting, summary: SummaryDraft
     ) -> None: ...
+
+    def mark_summary_regeneration_succeeded(
+        self, *, meeting: QueuedMeeting, summary: SummaryDraft
+    ) -> None: ...
+
+    def mark_summary_regeneration_failed(self, meeting: QueuedMeeting) -> None: ...
 
     def mark_failure(
         self,
@@ -124,6 +131,13 @@ class PipelineProcessor:
         self._meetings_dir = Path(meetings_dir)
 
     def process(self, meeting: QueuedMeeting) -> None:
+        if (
+            meeting.status == MeetingStatus.DONE
+            and meeting.summary_regeneration_status == SummaryRegenerationStatus.PROCESSING
+        ):
+            self._process_summary_regeneration(meeting)
+            return
+
         if meeting.status in {MeetingStatus.PENDING, MeetingStatus.NORMALIZING}:
             self._process_from_normalization(meeting)
             return
@@ -319,6 +333,32 @@ class PipelineProcessor:
             return
 
         self._queue.mark_summarization_succeeded(meeting=meeting, summary=summary)
+
+    def _process_summary_regeneration(self, meeting: QueuedMeeting) -> None:
+        try:
+            transcript_segments = self._queue.load_transcript_segments(meeting)
+        except Exception:
+            logger.exception(
+                "failed to load transcript rows for summary regeneration of meeting %s",
+                meeting.id,
+            )
+            self._queue.mark_summary_regeneration_failed(meeting)
+            return
+
+        try:
+            summary = self._summarizer.summarize(
+                meeting=meeting,
+                transcript_segments=transcript_segments,
+            )
+        except Exception:
+            logger.exception("summary regeneration failed for meeting %s", meeting.id)
+            self._queue.mark_summary_regeneration_failed(meeting)
+            return
+
+        self._queue.mark_summary_regeneration_succeeded(
+            meeting=meeting,
+            summary=summary,
+        )
 
     def _safe_mark_transcription_progress(
         self, *, meeting: QueuedMeeting, progress: int

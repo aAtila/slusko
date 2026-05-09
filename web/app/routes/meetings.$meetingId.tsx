@@ -14,6 +14,7 @@ import type {
   MeetingStatus,
   SummaryActionItem,
   SummaryActionItemOwner,
+  SummaryRegenerationStatus,
 } from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import type { MeetingExportFlavor } from "~/lib/meeting-export";
@@ -95,10 +96,31 @@ export default function MeetingDetailPage({
   const [protectedSpeakerLabels, setProtectedSpeakerLabels] = useState<
     Record<string, true | undefined>
   >({});
+  const [summaryRegenerationNotice, setSummaryRegenerationNotice] =
+    useState<SummaryRegenerationNotice | null>(null);
+  const [summaryRegenerationActionError, setSummaryRegenerationActionError] =
+    useState<string | null>(null);
+  const previousSummaryRegenerationStatusRef = useRef<
+    SummaryRegenerationStatus | undefined
+  >(meeting.summaryRegenerationStatus);
   const { revalidate } = useRevalidator();
+  const submittingIntent = navigation.formData?.get("_intent");
+  const isDeleting =
+    navigation.state !== "idle" && submittingIntent === "delete-meeting";
+  const isUpdatingTitle =
+    navigation.state !== "idle" && submittingIntent === "update-title";
+  const isRetrying =
+    navigation.state !== "idle" && submittingIntent === "retry-meeting";
+  const isRegenerateSubmitting =
+    navigation.state !== "idle" && submittingIntent === "regenerate-summary";
 
   useEffect(() => {
-    if (isTerminalMeetingStatus(meeting.status)) {
+    if (
+      !shouldPollMeetingDetail(
+        meeting.status,
+        meeting.summaryRegenerationStatus,
+      )
+    ) {
       return;
     }
 
@@ -107,15 +129,65 @@ export default function MeetingDetailPage({
     }, 5_000);
 
     return () => window.clearInterval(intervalId);
-  }, [meeting.status, revalidate]);
+  }, [meeting.status, meeting.summaryRegenerationStatus, revalidate]);
 
-  const submittingIntent = navigation.formData?.get("_intent");
-  const isDeleting =
-    navigation.state !== "idle" && submittingIntent === "delete-meeting";
-  const isUpdatingTitle =
-    navigation.state !== "idle" && submittingIntent === "update-title";
-  const isRetrying =
-    navigation.state !== "idle" && submittingIntent === "retry-meeting";
+  useEffect(() => {
+    if (isActiveSummaryRegeneration(meeting.summaryRegenerationStatus)) {
+      previousSummaryRegenerationStatusRef.current =
+        meeting.summaryRegenerationStatus;
+      setSummaryRegenerationNotice(null);
+      setSummaryRegenerationActionError(null);
+      return;
+    }
+
+    const notice = getObservedSummaryRegenerationNotice(
+      previousSummaryRegenerationStatusRef.current,
+      meeting.summaryRegenerationStatus,
+    );
+
+    previousSummaryRegenerationStatusRef.current =
+      meeting.summaryRegenerationStatus;
+
+    if (notice === null) {
+      return;
+    }
+
+    setSummaryRegenerationActionError(null);
+    setSummaryRegenerationNotice(notice);
+  }, [meeting.summaryRegenerationStatus]);
+
+  useEffect(() => {
+    if (isRegenerateSubmitting) {
+      setSummaryRegenerationNotice(null);
+      setSummaryRegenerationActionError(null);
+    }
+  }, [isRegenerateSubmitting]);
+
+  useEffect(() => {
+    if (actionData?.intent !== "regenerate-summary") {
+      return;
+    }
+
+    if (actionData.ok) {
+      setSummaryRegenerationActionError(null);
+      return;
+    }
+
+    setSummaryRegenerationActionError(actionData.error);
+  }, [actionData]);
+
+  useEffect(() => {
+    if (summaryRegenerationNotice === null) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSummaryRegenerationNotice(null);
+    }, 8_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [summaryRegenerationNotice]);
+
   const formattedDuration =
     meeting.durationSeconds === null
       ? "Not available"
@@ -285,6 +357,10 @@ export default function MeetingDetailPage({
         <div className="mx-auto grid w-full max-w-[1500px] gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
             <SummaryPanel
+              isRegenerateSubmitting={isRegenerateSubmitting}
+              regenerationActionError={summaryRegenerationActionError}
+              regenerationNotice={summaryRegenerationNotice}
+              regenerationStatus={meeting.summaryRegenerationStatus}
               speakerMap={speakerMap}
               status={meeting.status}
               summary={summary}
@@ -592,15 +668,65 @@ function getCopyFeedback(state: MeetingExportCopyState, label: string): string {
   return `${capitalize(label)} export uses saved summary and speaker mappings.`;
 }
 
+function isActiveSummaryRegeneration(status: SummaryRegenerationStatus) {
+  return status === "pending" || status === "processing";
+}
+
+type SummaryRegenerationNotice = {
+  message: string;
+  tone: "danger" | "success";
+};
+
+export function shouldPollMeetingDetail(
+  meetingStatus: MeetingStatus,
+  regenerationStatus: SummaryRegenerationStatus,
+) {
+  return (
+    !isTerminalMeetingStatus(meetingStatus) ||
+    isActiveSummaryRegeneration(regenerationStatus)
+  );
+}
+
+export function getObservedSummaryRegenerationNotice(
+  previousStatus: SummaryRegenerationStatus | undefined,
+  currentStatus: SummaryRegenerationStatus,
+): SummaryRegenerationNotice | null {
+  if (!previousStatus || !isActiveSummaryRegeneration(previousStatus)) {
+    return null;
+  }
+
+  if (currentStatus === "idle") {
+    return { message: "Summary regenerated.", tone: "success" };
+  }
+
+  if (currentStatus === "failed") {
+    return {
+      message:
+        "Could not regenerate summary. The previous summary is unchanged.",
+      tone: "danger",
+    };
+  }
+
+  return null;
+}
+
 function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 export function SummaryPanel({
+  isRegenerateSubmitting = false,
+  regenerationActionError,
+  regenerationNotice,
+  regenerationStatus = "idle",
   speakerMap = {},
   summary,
   status,
 }: {
+  isRegenerateSubmitting?: boolean;
+  regenerationActionError?: string | null;
+  regenerationNotice?: SummaryRegenerationNotice | null;
+  regenerationStatus?: SummaryRegenerationStatus;
   speakerMap?: SpeakerMap;
   summary: MeetingSummary | null;
   status: MeetingStatus;
@@ -614,6 +740,14 @@ export function SummaryPanel({
   }
 
   const keyTopics = getKeyTopics(summary, [], speakerMap);
+  const canRegenerate = status === "done" && summary !== null;
+  const isRegenerating =
+    isRegenerateSubmitting || isActiveSummaryRegeneration(regenerationStatus);
+  const regenerationFeedback =
+    regenerationNotice ??
+    (regenerationActionError
+      ? { message: regenerationActionError, tone: "danger" as const }
+      : null);
 
   return (
     <article className={cardClass} id="overview">
@@ -625,10 +759,48 @@ export function SummaryPanel({
           aria-hidden="true"
           className="bg-hairline hidden h-px flex-1 sm:block"
         />
-        <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase">
-          Auto-generated
-        </span>
+        {canRegenerate ? (
+          <Form
+            method="post"
+            onSubmit={(event) => {
+              if (
+                !window.confirm(
+                  "Regenerate this summary? The current summary will be replaced if regeneration succeeds.",
+                )
+              ) {
+                event.preventDefault();
+              }
+            }}
+            preventScrollReset
+          >
+            <input name="_intent" type="hidden" value="regenerate-summary" />
+            <button
+              className="border-hairline text-ink-soft hover:bg-surface-sunken inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm font-medium transition disabled:cursor-wait disabled:opacity-60"
+              disabled={isRegenerating}
+              type="submit"
+            >
+              {isRegenerating ? "Regenerating…" : "Regenerate summary"}
+            </button>
+          </Form>
+        ) : (
+          <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase">
+            Auto-generated
+          </span>
+        )}
       </header>
+
+      {regenerationFeedback ? (
+        <p
+          aria-live="polite"
+          className={`mt-4 text-sm font-medium ${
+            regenerationFeedback.tone === "danger"
+              ? "text-danger"
+              : "text-success"
+          }`}
+        >
+          {regenerationFeedback.message}
+        </p>
+      ) : null}
 
       {summary === null ? (
         <EmptyState>{emptyMessage}</EmptyState>
@@ -879,7 +1051,7 @@ const PIPELINE_STAGES: Array<{
 
 type StageState = "complete" | "active" | "pending" | "failed";
 
-function ProcessingPanel({
+export function ProcessingPanel({
   failedAtStage,
   progress,
   status,

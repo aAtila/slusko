@@ -8,6 +8,82 @@ import { MeetingMutationError } from "./meetings-mutations.server";
 const meetingId = "00000000-0000-4000-8000-000000000006";
 
 describe("meeting detail route action", () => {
+  test("queues summary regeneration through the regenerate mutation", async () => {
+    const formData = new FormData();
+    const calls: Array<{ meetingId: string | undefined }> = [];
+
+    formData.set("_intent", "regenerate-summary");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        regenerateSummary: async (input) => {
+          calls.push(input);
+          return { id: input.meetingId ?? "" };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: { ok: true, intent: "regenerate-summary" },
+    } satisfies MeetingDetailActionResult);
+    expect(calls).toEqual([{ meetingId }]);
+  });
+
+  test("returns summary regeneration validation feedback", async () => {
+    const formData = new FormData();
+
+    formData.set("_intent", "regenerate-summary");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        regenerateSummary: async () => {
+          throw new MeetingMutationError(
+            "Summary regeneration is already in progress.",
+            400,
+          );
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: false,
+        intent: "regenerate-summary",
+        error: "Summary regeneration is already in progress.",
+      },
+      status: 400,
+    } satisfies MeetingDetailActionResult);
+  });
+
+  test("returns friendly feedback when summary regeneration queueing fails unexpectedly", async () => {
+    const formData = new FormData();
+
+    formData.set("_intent", "regenerate-summary");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        regenerateSummary: async () => {
+          throw new Error("database unavailable");
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: false,
+        intent: "regenerate-summary",
+        error: "Could not queue summary regeneration. Please try again.",
+      },
+      status: 500,
+    } satisfies MeetingDetailActionResult);
+  });
+
   test("queues a retry through the retry mutation", async () => {
     const formData = new FormData();
     const calls: Array<{ meetingId: string | undefined }> = [];

@@ -23,6 +23,13 @@ export const meetingStatus = pgEnum("meeting_status", [
   "error",
 ]);
 
+export const summaryRegenerationStatus = pgEnum("summary_regeneration_status", [
+  "idle",
+  "pending",
+  "processing",
+  "failed",
+]);
+
 export const errorKind = pgEnum("error_kind", [
   "normalization_failed",
   "transcription_failed",
@@ -41,6 +48,15 @@ export const meetings = pgTable(
     sourceFilenames: text("source_filenames").array().notNull(),
     uploadedBy: text("uploaded_by").notNull(),
     status: meetingStatus("status").notNull().default("pending"),
+    summaryRegenerationStatus: summaryRegenerationStatus(
+      "summary_regeneration_status",
+    )
+      .notNull()
+      .default("idle"),
+    summaryRegenerationProcessingStartedAt: timestamp(
+      "summary_regeneration_processing_started_at",
+      { withTimezone: true },
+    ),
     errorKind: errorKind("error_kind"),
     errorMessage: text("error_message"),
     failedAtStage: meetingStatus("failed_at_stage"),
@@ -166,5 +182,7 @@ export const speakerMappings = pgTable(
 );
 
 export type MeetingStatus = (typeof meetingStatus.enumValues)[number];
+export type SummaryRegenerationStatus =
+  (typeof summaryRegenerationStatus.enumValues)[number];
 export type ErrorKind = (typeof errorKind.enumValues)[number];
 export type Meeting = typeof meetings.$inferSelect;

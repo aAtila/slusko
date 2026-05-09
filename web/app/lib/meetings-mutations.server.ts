@@ -2,9 +2,11 @@ import { and, eq } from "drizzle-orm";
 import {
   meetings,
   speakerMappings,
+  summaries,
   transcriptSegments,
   type ErrorKind,
   type MeetingStatus,
+  type SummaryRegenerationStatus,
 } from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
 import { removeMeetingDirectory as removeMeetingStorageDirectory } from "./meeting-storage.server";
@@ -45,6 +47,10 @@ export type SaveSpeakerMappingResult = {
 export type RetryMeetingResult = {
   id: string;
   resumeFromStage: MeetingStatus;
+};
+
+export type RegenerateSummaryResult = {
+  id: string;
 };
 
 type MeetingFailureRow = {
@@ -102,6 +108,22 @@ type RetryMeetingOptions = {
     meetingId: string,
     update: RetryMeetingUpdate,
   ) => Promise<RetryMeetingResult | null>;
+};
+
+type MeetingSummaryRegenerationRow = {
+  id: string;
+  status: MeetingStatus;
+  summaryRegenerationStatus: SummaryRegenerationStatus;
+  hasSummary: boolean;
+};
+
+type RegenerateSummaryOptions = {
+  findMeetingSummaryRegenerationById?: (
+    meetingId: string,
+  ) => Promise<MeetingSummaryRegenerationRow | null>;
+  queueSummaryRegenerationById?: (
+    meetingId: string,
+  ) => Promise<RegenerateSummaryResult | null>;
 };
 
 export async function deleteMeetingAndArtifacts(
@@ -195,6 +217,50 @@ export async function updateMeetingTitle(
   return result;
 }
 
+export async function regenerateSummary(
+  input: { meetingId: string | undefined },
+  options: RegenerateSummaryOptions = {},
+): Promise<RegenerateSummaryResult> {
+  if (!isMeetingId(input.meetingId)) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  const meeting = await (
+    options.findMeetingSummaryRegenerationById ??
+    findMeetingSummaryRegenerationById
+  )(input.meetingId);
+
+  if (meeting === null) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  assertCanRegenerateSummary(meeting);
+
+  const result = await (
+    options.queueSummaryRegenerationById ?? queueSummaryRegenerationById
+  )(meeting.id);
+
+  if (result === null) {
+    const currentMeeting = await (
+      options.findMeetingSummaryRegenerationById ??
+      findMeetingSummaryRegenerationById
+    )(input.meetingId);
+
+    if (currentMeeting === null) {
+      throw new MeetingMutationError("Meeting not found", 404);
+    }
+
+    assertCanRegenerateSummary(currentMeeting);
+
+    throw new MeetingMutationError(
+      "Could not queue summary regeneration. Please try again.",
+      400,
+    );
+  }
+
+  return result;
+}
+
 export async function retryMeeting(
   input: { meetingId: string | undefined },
   options: RetryMeetingOptions = {},
@@ -241,6 +307,32 @@ export async function retryMeeting(
   }
 
   return result;
+}
+
+function assertCanRegenerateSummary(meeting: MeetingSummaryRegenerationRow) {
+  if (meeting.status !== "done") {
+    throw new MeetingMutationError(
+      "Only completed meetings can regenerate summaries.",
+      400,
+    );
+  }
+
+  if (!meeting.hasSummary) {
+    throw new MeetingMutationError(
+      "Only meetings with an existing summary can regenerate summaries.",
+      400,
+    );
+  }
+
+  if (
+    meeting.summaryRegenerationStatus === "pending" ||
+    meeting.summaryRegenerationStatus === "processing"
+  ) {
+    throw new MeetingMutationError(
+      "Summary regeneration is already in progress.",
+      400,
+    );
+  }
 }
 
 function createRetryMeetingUpdate(
@@ -362,6 +454,34 @@ async function findMeetingFailureById(
   return row ?? null;
 }
 
+async function findMeetingSummaryRegenerationById(
+  meetingId: string,
+): Promise<MeetingSummaryRegenerationRow | null> {
+  const database = await getDatabase();
+  const [row] = await database
+    .select({
+      id: meetings.id,
+      status: meetings.status,
+      summaryRegenerationStatus: meetings.summaryRegenerationStatus,
+      summaryMeetingId: summaries.meetingId,
+    })
+    .from(meetings)
+    .leftJoin(summaries, eq(summaries.meetingId, meetings.id))
+    .where(eq(meetings.id, meetingId))
+    .limit(1);
+
+  if (row === undefined) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    status: row.status,
+    summaryRegenerationStatus: row.summaryRegenerationStatus,
+    hasSummary: row.summaryMeetingId !== null,
+  };
+}
+
 async function speakerLabelExistsForMeeting(
   meetingId: string,
   speakerLabel: string,
@@ -419,6 +539,39 @@ async function updateTitleById(
     .returning({ id: meetings.id, title: meetings.title });
 
   return row ?? null;
+}
+
+async function queueSummaryRegenerationById(
+  meetingId: string,
+): Promise<RegenerateSummaryResult | null> {
+  const { sqlClient } = await import("~/db/client.server");
+
+  return sqlClient.begin(async (sql) => {
+    const [row] = await sql`
+      update meetings
+      set
+        summary_regeneration_status = 'pending',
+        summary_regeneration_processing_started_at = null,
+        updated_at = now()
+      where id = ${meetingId}
+        and status = 'done'
+        and summary_regeneration_status in ('idle', 'failed')
+        and exists (
+          select 1
+          from summaries
+          where summaries.meeting_id = meetings.id
+        )
+      returning id
+    `;
+
+    if (row === undefined) {
+      return null;
+    }
+
+    await sql`select pg_notify('meetings_pending', ${meetingId})`;
+
+    return { id: row.id };
+  });
 }
 
 async function retryMeetingById(

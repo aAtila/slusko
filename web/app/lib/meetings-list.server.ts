@@ -9,6 +9,7 @@ import {
   type SummaryActionItem,
   type SummaryDecision,
   type SummaryOpenQuestion,
+  type SummaryRegenerationStatus,
 } from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
 import type {
@@ -34,6 +35,8 @@ export type HomeMeetingListRow = {
 
 export type MeetingDetailRow = HomeMeetingListRow & {
   updatedAt: Date;
+  summaryRegenerationStatus: SummaryRegenerationStatus;
+  summaryRegenerationProcessingStartedAt: Date | null;
 };
 
 export type SummaryRow = {
@@ -141,6 +144,9 @@ async function findMeetingDetailRow(
       failedAtStage: meetings.failedAtStage,
       createdAt: meetings.createdAt,
       updatedAt: meetings.updatedAt,
+      summaryRegenerationStatus: meetings.summaryRegenerationStatus,
+      summaryRegenerationProcessingStartedAt:
+        meetings.summaryRegenerationProcessingStartedAt,
     })
     .from(meetings)
     .where(eq(meetings.id, meetingId))
@@ -160,6 +166,9 @@ function serializeMeetingDetailRow(row: MeetingDetailRow): MeetingDetail {
   return {
     ...serializeHomeMeetingRow(row),
     updatedAt: row.updatedAt.toISOString(),
+    summaryRegenerationStatus: row.summaryRegenerationStatus,
+    summaryRegenerationProcessingStartedAt:
+      row.summaryRegenerationProcessingStartedAt?.toISOString() ?? null,
   };
 }
 
