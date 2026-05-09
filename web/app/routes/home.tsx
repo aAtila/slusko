@@ -621,13 +621,14 @@ function MeetingList({
       id="meetings-list"
     >
       <div className="hidden md:block">
-        <div className="border-hairline text-ink-muted grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(110px,0.45fr)_minmax(150px,0.55fr)] border-b px-6 py-4 text-xs font-medium tracking-[0.08em] uppercase">
+        <div className="border-hairline text-ink-muted grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(90px,0.38fr)_minmax(130px,0.5fr)_minmax(150px,0.55fr)] border-b px-6 py-4 text-xs font-medium tracking-[0.08em] uppercase">
           <div>Meeting</div>
           <div className="flex items-center gap-2">
             Uploaded
             <Icon name="chevron-down" className="size-4" />
           </div>
           <div>Duration</div>
+          <div>Language</div>
           <div>Status</div>
         </div>
         <ul className="divide-hairline divide-y">
@@ -688,7 +689,7 @@ export function MeetingRow({
   return (
     <li>
       <Link
-        className="hover:bg-canvas grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(110px,0.45fr)_minmax(150px,0.55fr)] items-center gap-4 px-6 py-4 transition"
+        className="hover:bg-canvas grid grid-cols-[minmax(0,1.45fr)_minmax(120px,0.62fr)_minmax(90px,0.38fr)_minmax(130px,0.5fr)_minmax(150px,0.55fr)] items-center gap-4 px-6 py-4 transition"
         to={`/meetings/${meeting.id}`}
       >
         <div className="flex min-w-0 items-center gap-5">
@@ -710,9 +711,8 @@ export function MeetingRow({
         <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
           <Icon name="clock" className="size-4" />
           <span>{durationLabel}</span>
-          <span className="text-ink-subtle font-sans">·</span>
-          <span className="font-sans">{languageLabel}</span>
         </p>
+        <p className="text-ink-muted text-sm">{languageLabel}</p>
         <StatusBadge
           progress={meeting.transcriptionProgress}
           status={meeting.status}
@@ -757,12 +757,13 @@ export function MeetingCard({
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
-            <Icon name="clock" className="size-4" />
-            <span>{durationLabel}</span>
-            <span className="text-ink-subtle font-sans">·</span>
-            <span className="font-sans">{languageLabel}</span>
-          </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
+              <Icon name="clock" className="size-4" />
+              <span>{durationLabel}</span>
+            </p>
+            <p className="text-ink-muted text-sm">{languageLabel}</p>
+          </div>
           <StatusBadge
             progress={meeting.transcriptionProgress}
             status={meeting.status}
