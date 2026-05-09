@@ -893,7 +893,7 @@ export function SummaryPanel({
             </p>
           </section>
 
-          <div className="border-hairline grid gap-7 border-t pt-7 md:grid-cols-3">
+          <div className="border-hairline grid gap-7 border-t pt-7 md:grid-cols-2">
             <SummaryList
               emptyText="No key topics recorded."
               items={keyTopics.map((topic, index) => ({
@@ -915,16 +915,15 @@ export function SummaryPanel({
               }))}
               title="Decisions"
             />
+            <SummaryList
+              emptyText="No open questions recorded."
+              items={summary.openQuestions.map((question, index) => ({
+                content: applySpeakerMap(question.text, speakerMap),
+                id: `open-question-${index}`,
+              }))}
+              title="Open questions"
+            />
           </div>
-
-          <SummaryList
-            emptyText="No open questions recorded."
-            items={summary.openQuestions.map((question, index) => ({
-              content: applySpeakerMap(question.text, speakerMap),
-              id: `open-question-${index}`,
-            }))}
-            title="Open questions"
-          />
         </div>
       )}
     </article>
