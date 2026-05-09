@@ -9,7 +9,7 @@ import type {
   SpeakerMap,
   TranscriptSegment,
 } from "~/lib/meetings-list";
-import {
+import MeetingDetailPage, {
   ErrorBlock,
   getObservedSummaryRegenerationNotice,
   MeetingExportsPanel,
@@ -81,6 +81,42 @@ function renderMeetingExportsPanel(
   meetingId = "00000000-0000-4000-8000-000000000123",
 ) {
   return renderToStaticMarkup(<MeetingExportsPanel meetingId={meetingId} />);
+}
+
+function renderMeetingDetailPage({
+  meetingOverrides = {},
+  summary = null,
+}: {
+  meetingOverrides?: Partial<MeetingDetail>;
+  summary?: MeetingSummary | null;
+} = {}) {
+  const routeMeeting = meeting({
+    status: "done",
+    errorKind: null,
+    errorMessage: null,
+    failedAtStage: null,
+    transcriptionProgress: null,
+    ...meetingOverrides,
+  });
+  const routeProps = {
+    loaderData: {
+      meeting: routeMeeting,
+      speakerMappings: [],
+      summary,
+      transcriptSegments: [],
+    },
+  } as unknown as Parameters<typeof MeetingDetailPage>[0];
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/",
+        element: <MeetingDetailPage {...routeProps} />,
+      },
+    ],
+    { initialEntries: ["/"] },
+  );
+
+  return renderToStaticMarkup(<RouterProvider router={router} />);
 }
 
 function renderProcessingPanel({
@@ -226,6 +262,64 @@ const savedSummary: MeetingSummary = {
   openQuestions: [{ text: "Should we include optional migration docs?" }],
   updatedAt: "2026-05-07T20:00:00.000Z",
 };
+
+describe("meeting detail export control", () => {
+  test("renders export as a compact header action instead of a right-rail card", () => {
+    const markup = renderMeetingDetailPage();
+    const source = readFileSync(
+      new URL("./meetings.$meetingId.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(markup).toContain("Export");
+    expect(markup).toContain('aria-label="Open export options"');
+    expect(markup).toContain('aria-haspopup="dialog"');
+    expect(source).not.toContain('name="chevron-down"');
+    expect(markup).not.toContain('id="export"');
+    expect(markup).not.toContain(
+      "Copy or download Markdown generated from the saved meeting data.",
+    );
+  });
+
+  test("keeps header export enabled regardless of processing status or summary presence", () => {
+    const processingMarkup = renderMeetingDetailPage({
+      meetingOverrides: { status: "summarizing" },
+      summary: null,
+    });
+
+    expect(processingMarkup).toContain('aria-label="Open export options"');
+    expect(processingMarkup).not.toContain('disabled=""');
+    expect(processingMarkup).not.toContain(
+      'title="Export is available after processing finishes"',
+    );
+
+    const doneWithoutSummaryMarkup = renderMeetingDetailPage({ summary: null });
+
+    expect(doneWithoutSummaryMarkup).toContain(
+      'aria-label="Open export options"',
+    );
+    expect(doneWithoutSummaryMarkup).not.toContain('disabled=""');
+    expect(doneWithoutSummaryMarkup).not.toContain(
+      'title="Export is available after processing finishes"',
+    );
+  });
+
+  test("closes the export dropdown on successful export, outside click, and Escape", () => {
+    const source = readFileSync(
+      new URL("./meetings.$meetingId.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain('document.addEventListener("pointerdown"');
+    expect(source).toContain('document.addEventListener("keydown"');
+    expect(source).toContain('event.key !== "Escape"');
+    expect(source).toContain("triggerRef.current?.focus()");
+    expect(source).toContain("onSuccessfulExport");
+    expect(source).toContain("onExported?.()");
+    expect(source).toContain("onExported={onSuccessfulExport}");
+    expect(source).toContain("onClick={onExported}");
+  });
+});
 
 describe("summary regeneration observed notices", () => {
   test("reports success only after active regeneration returns to idle", () => {

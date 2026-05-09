@@ -7,6 +7,7 @@ export type IconName =
   | "chevron-left"
   | "chevron-right"
   | "clock"
+  | "download"
   | "file"
   | "folder"
   | "home"
@@ -110,6 +111,14 @@ export function Icon({
         <svg {...common}>
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 2" />
+        </svg>
+      );
+    case "download":
+      return (
+        <svg {...common}>
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 21h14" />
         </svg>
       );
     case "file":

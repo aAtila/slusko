@@ -344,10 +344,13 @@ export default function MeetingDetailPage({
                 onBeginEdit={beginTitleEdit}
                 title={meeting.title}
               />
-              <StatusBadge
-                progress={meeting.transcriptionProgress}
-                status={meeting.status}
-              />
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                <StatusBadge
+                  progress={meeting.transcriptionProgress}
+                  status={meeting.status}
+                />
+                <MeetingExportMenu meetingId={meeting.id} />
+              </div>
             </div>
           )}
         </header>
@@ -390,7 +393,6 @@ export default function MeetingDetailPage({
               progress={meeting.transcriptionProgress}
               status={meeting.status}
             />
-            <MeetingExportsPanel meetingId={meeting.id} />
             <SpeakersPanel
               durationSeconds={meeting.durationSeconds}
               onSpeakerNameChange={updateSpeakerName}
@@ -557,7 +559,84 @@ const exportFlavors: Array<{
   { downloadLabel: "Full .md", flavor: "full", label: "full" },
 ];
 
-export function MeetingExportsPanel({ meetingId }: { meetingId: string }) {
+function MeetingExportMenu({ meetingId }: { meetingId: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverId = "meeting-export-popover";
+  const onSuccessfulExport = useCallback(() => setIsOpen(false), []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        aria-controls={popoverId}
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label="Open export options"
+        className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition active:translate-y-px"
+        onClick={() => setIsOpen((currentIsOpen) => !currentIsOpen)}
+        ref={triggerRef}
+        type="button"
+      >
+        <Icon className="size-4" name="download" />
+        Export
+      </button>
+      {isOpen ? (
+        <div
+          aria-label="Export options"
+          className="absolute top-full right-0 z-20 mt-2 w-[min(340px,calc(100vw-2rem))]"
+          id={popoverId}
+          role="dialog"
+        >
+          <MeetingExportsPanel
+            meetingId={meetingId}
+            onExported={onSuccessfulExport}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function MeetingExportsPanel({
+  meetingId,
+  onExported,
+}: {
+  meetingId: string;
+  onExported?: () => void;
+}) {
   const [copyStates, setCopyStates] = useState<
     Record<MeetingExportFlavor, MeetingExportCopyState>
   >({ full: "idle", summary: "idle" });
@@ -591,13 +670,14 @@ export function MeetingExportsPanel({ meetingId }: { meetingId: string }) {
 
       await navigator.clipboard.writeText(await response.text());
       setCopyState(flavor, "copied");
+      onExported?.();
     } catch {
       setCopyState(flavor, "failed");
     }
   };
 
   return (
-    <aside className={railCardClass}>
+    <aside className={railCardClass} id="export">
       <header>
         <h2 className="font-display text-ink text-lg font-medium tracking-tight">
           Export
@@ -626,6 +706,7 @@ export function MeetingExportsPanel({ meetingId }: { meetingId: string }) {
                 <a
                   className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-10 items-center justify-center rounded-lg px-3 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.35)] transition active:translate-y-px"
                   href={`${exportPath(flavor)}?download=1`}
+                  onClick={onExported}
                 >
                   {downloadLabel}
                 </a>
