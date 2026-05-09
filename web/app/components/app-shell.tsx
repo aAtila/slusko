@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type DragEventHandler,
@@ -39,11 +40,14 @@ export type AppShellDropZone = {
   onDrop: DragEventHandler<HTMLElement>;
 };
 
+export type SidebarTone = "ink" | "brand" | "accent" | "warning";
+
 export type AppShellSectionNavItem = {
   defaultActive?: boolean;
   icon: IconName;
   label: string;
   to: string;
+  tone?: SidebarTone;
 };
 
 export type AppShellSidebar =
@@ -83,11 +87,38 @@ const meetingDetailSidebar: AppShellSidebar = {
   kind: "sections",
   ariaLabel: "Meeting sections",
   items: [
-    { defaultActive: true, icon: "sliders", label: "Summary", to: "#overview" },
+    {
+      defaultActive: true,
+      icon: "sliders",
+      label: "Summary",
+      to: "#overview",
+      tone: "brand",
+    },
+    {
+      icon: "folder",
+      label: "Key topics",
+      to: "#summary-key-topics",
+      tone: "ink",
+    },
+    {
+      icon: "check",
+      label: "Action items",
+      to: "#summary-action-items",
+      tone: "accent",
+    },
+    {
+      icon: "megaphone",
+      label: "Decisions",
+      to: "#summary-decisions",
+      tone: "brand",
+    },
+    {
+      icon: "alert",
+      label: "Questions",
+      to: "#summary-open-questions",
+      tone: "warning",
+    },
     { icon: "file", label: "Transcript", to: "#transcript" },
-    { icon: "refresh", label: "Processing", to: "#processing" },
-    { icon: "users", label: "Speakers", to: "#speakers" },
-    { icon: "megaphone", label: "Key moments", to: "#key-moments" },
   ],
 };
 
@@ -124,7 +155,7 @@ export function AppShell() {
   const sidebar = chromeOverride?.sidebar ?? routeSidebar;
   const storage = chromeOverride?.storage ?? defaultStorage;
   const desktopInsetClass =
-    sidebar.kind === "sections" ? "lg:pl-[164px]" : "lg:pl-[258px]";
+    sidebar.kind === "sections" ? "lg:pl-[180px]" : "lg:pl-[258px]";
 
   return (
     <AppShellChromeContext.Provider value={contextValue}>
@@ -197,15 +228,94 @@ export function DesktopSidebar({
   );
 }
 
+const SIDEBAR_TONE_ACTIVE_CLASS: Record<SidebarTone, string> = {
+  ink: "bg-surface-sunken text-ink",
+  brand: "bg-brand-soft text-brand",
+  accent: "bg-accent-soft/70 text-accent-deep",
+  warning: "bg-warning-soft/70 text-warning",
+};
+
+function useSectionScrollSpy(
+  items: ReadonlyArray<AppShellSectionNavItem>,
+): string | null {
+  const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const orderedAnchors: string[] = [];
+    for (const item of itemsRef.current) {
+      if (item.to.startsWith("#")) {
+        orderedAnchors.push(item.to);
+      }
+    }
+
+    if (orderedAnchors.length === 0) {
+      return;
+    }
+
+    const visibleIds = new Set<string>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            visibleIds.add(entry.target.id);
+          } else {
+            visibleIds.delete(entry.target.id);
+          }
+        }
+
+        for (const anchor of orderedAnchors) {
+          if (visibleIds.has(anchor.slice(1))) {
+            setActiveAnchor(anchor);
+            return;
+          }
+        }
+      },
+      {
+        rootMargin: "-12% 0px -65% 0px",
+        threshold: [0, 0.1, 0.5, 1],
+      },
+    );
+
+    const observed: Element[] = [];
+    for (const anchor of orderedAnchors) {
+      const element = document.getElementById(anchor.slice(1));
+      if (element !== null) {
+        observer.observe(element);
+        observed.push(element);
+      }
+    }
+
+    if (observed.length === 0) {
+      return;
+    }
+
+    return () => observer.disconnect();
+  }, [items]);
+
+  return activeAnchor;
+}
+
 function SectionSidebar({
   sidebar,
 }: {
   sidebar: Extract<AppShellSidebar, { kind: "sections" }>;
 }) {
   const location = useLocation();
+  const spyAnchor = useSectionScrollSpy(sidebar.items);
+  const explicitActive = spyAnchor ?? (location.hash || null);
+  const fallbackActive =
+    sidebar.items.find((candidate) => candidate.defaultActive === true)?.to ??
+    null;
+  const effectiveActive = explicitActive ?? fallbackActive;
 
   return (
-    <aside className="border-hairline bg-surface hidden w-[164px] border-r lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
+    <aside className="border-hairline bg-surface hidden w-[180px] border-r lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
       <Link
         aria-label="Sluško home"
         className="border-hairline flex h-24 items-center justify-center border-b"
@@ -215,20 +325,19 @@ function SectionSidebar({
       </Link>
       <nav
         aria-label={sidebar.ariaLabel}
-        className="flex flex-1 flex-col gap-1 px-3 py-5 text-center text-xs font-medium"
+        className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-5 text-xs font-medium"
       >
         {sidebar.items.map((item) => {
-          const itemHash = item.to.startsWith("#") ? item.to : "";
-          const isActive = location.hash
-            ? itemHash === location.hash
-            : item.defaultActive === true;
+          const isActive = effectiveActive === item.to;
+          const tone = item.tone ?? "brand";
+          const activeClass = SIDEBAR_TONE_ACTIVE_CLASS[tone];
 
           return (
             <Link
               aria-current={isActive ? "location" : undefined}
-              className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl px-2 py-3 transition ${
+              className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl px-2 py-3 text-center transition ${
                 isActive
-                  ? "bg-brand-soft text-brand"
+                  ? activeClass
                   : "text-ink-muted hover:bg-surface-sunken/70 hover:text-ink-soft"
               }`}
               key={item.label}

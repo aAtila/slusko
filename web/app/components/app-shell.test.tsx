@@ -56,17 +56,27 @@ describe("DesktopSidebar", () => {
     expect(markup).not.toContain("2 processed / 3 meetings");
   });
 
-  test("omits export from the default meeting section navigation", () => {
+  test("renders a flat list of summary anchor items in the meeting section navigation", () => {
     const markup = renderAppShellAt(
       "/meetings/00000000-0000-4000-8000-000000000123",
     );
 
     expect(markup).toContain('aria-label="Meeting sections"');
     expect(markup).toContain("#overview");
+    expect(markup).toContain("#summary-key-topics");
+    expect(markup).toContain("#summary-action-items");
+    expect(markup).toContain("#summary-decisions");
+    expect(markup).toContain("#summary-open-questions");
     expect(markup).toContain("#transcript");
-    expect(markup).toContain("#processing");
-    expect(markup).toContain("#speakers");
-    expect(markup).toContain("#key-moments");
+    expect(markup).toContain("Summary");
+    expect(markup).toContain("Key topics");
+    expect(markup).toContain("Action items");
+    expect(markup).toContain("Decisions");
+    expect(markup).toContain("Questions");
+    expect(markup).toContain("Transcript");
+    expect(markup).not.toContain("#processing");
+    expect(markup).not.toContain("#speakers");
+    expect(markup).not.toContain("#key-moments");
     expect(markup).not.toContain("#export");
     expect(markup).not.toContain(">Export</span>");
   });

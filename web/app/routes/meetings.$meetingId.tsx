@@ -12,7 +12,6 @@ import {
 import { Icon } from "~/components/app-icons";
 import type {
   MeetingStatus,
-  SummaryActionItem,
   SummaryActionItemOwner,
   SummaryRegenerationStatus,
 } from "~/db/schema";
@@ -933,9 +932,16 @@ export function SummaryPanel({
       : null);
 
   return (
-    <article className={cardClass} id="overview">
+    <article
+      aria-labelledby="summary-panel-heading"
+      className="space-y-5"
+      id="overview"
+    >
       <header className="flex flex-wrap items-center gap-3">
-        <h2 className="font-display text-ink text-2xl font-medium tracking-tight">
+        <h2
+          className="font-display text-ink text-2xl font-medium tracking-tight"
+          id="summary-panel-heading"
+        >
           Summary
         </h2>
         <span
@@ -975,7 +981,7 @@ export function SummaryPanel({
       {regenerationFeedback ? (
         <p
           aria-live="polite"
-          className={`mt-4 text-sm font-medium ${
+          className={`text-sm font-medium ${
             regenerationFeedback.tone === "danger"
               ? "text-danger"
               : "text-success"
@@ -986,130 +992,310 @@ export function SummaryPanel({
       ) : null}
 
       {summary === null ? (
-        <EmptyState>{emptyMessage}</EmptyState>
+        <div className={cardClass}>
+          <EmptyState>{emptyMessage}</EmptyState>
+        </div>
       ) : (
-        <div className="mt-6 space-y-7">
-          <section>
-            <h3 className="sr-only">Overview</h3>
-            <p className="text-ink-soft text-base leading-7">
-              {applySpeakerMap(summary.overview, speakerMap)}
-            </p>
-          </section>
+        <div className="space-y-5">
+          <SummaryGlance
+            counts={{
+              topics: keyTopics.length,
+              decisions: summary.decisions.length,
+              actions: summary.actionItems.length,
+              questions: summary.openQuestions.length,
+            }}
+          />
 
-          <div className="border-hairline grid gap-7 border-t pt-7 md:grid-cols-2">
-            <SummaryList
-              emptyText="No key topics recorded."
-              items={keyTopics.map((topic, index) => ({
-                content: topic.label,
-                id: `topic-${index}`,
-                meta: topic.timestamp,
-              }))}
-              title="Key topics"
-            />
-            <ActionItemsList
-              items={summary.actionItems}
-              speakerMap={speakerMap}
-            />
-            <SummaryList
-              emptyText="No decisions recorded."
-              items={summary.decisions.map((decision, index) => ({
-                content: applySpeakerMap(decision.text, speakerMap),
-                id: `decision-${index}`,
-              }))}
-              title="Decisions"
-            />
-            <SummaryList
-              emptyText="No open questions recorded."
-              items={summary.openQuestions.map((question, index) => ({
-                content: applySpeakerMap(question.text, speakerMap),
-                id: `open-question-${index}`,
-              }))}
-              title="Open questions"
-            />
-          </div>
+          <SummaryOverview speakerMap={speakerMap} text={summary.overview} />
+
+          <SummarySection
+            emptyText="No key topics recorded."
+            items={keyTopics}
+            renderItem={(topic) => (
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <p className="text-ink-soft min-w-0 flex-1 text-[15px] leading-6">
+                  {topic.label}
+                </p>
+                {topic.timestamp ? (
+                  <time className="text-ink-muted shrink-0 font-mono text-[11px] tabular-nums">
+                    {topic.timestamp}
+                  </time>
+                ) : null}
+              </div>
+            )}
+            sectionId="topics"
+          />
+          <SummarySection
+            emptyText="No action items recorded."
+            items={summary.actionItems}
+            renderItem={(item) => (
+              <div>
+                <p className="text-ink-soft text-[15px] leading-6">
+                  {applySpeakerMap(item.task, speakerMap)}
+                </p>
+                <p className="text-ink-muted mt-1.5 font-mono text-[10px] tracking-[0.14em] uppercase">
+                  Owner: {renderActionItemOwner(item.owner, speakerMap)}
+                </p>
+              </div>
+            )}
+            sectionId="actions"
+          />
+          <SummarySection
+            emptyText="No decisions recorded."
+            items={summary.decisions}
+            renderItem={(decision) => (
+              <p className="text-ink-soft text-[15px] leading-6">
+                {applySpeakerMap(decision.text, speakerMap)}
+              </p>
+            )}
+            sectionId="decisions"
+          />
+          <SummarySection
+            emptyText="No open questions recorded."
+            items={summary.openQuestions}
+            renderItem={(question) => (
+              <p className="text-ink-soft text-[15px] leading-6">
+                {applySpeakerMap(question.text, speakerMap)}
+              </p>
+            )}
+            sectionId="questions"
+          />
         </div>
       )}
     </article>
   );
 }
 
-function SummaryList({
-  emptyText,
-  items,
-  title,
+type SummarySectionId = "topics" | "actions" | "decisions" | "questions";
+
+const SUMMARY_SECTION_META: Record<
+  SummarySectionId,
+  {
+    anchor: string;
+    chipClass: string;
+    indexClass: string;
+    label: string;
+    ruleClass: string;
+    shortLabel: string;
+  }
+> = {
+  topics: {
+    anchor: "summary-key-topics",
+    chipClass:
+      "border-hairline text-ink hover:border-ink hover:bg-surface-elevated",
+    indexClass: "text-ink-muted",
+    label: "Key topics",
+    ruleClass: "bg-ink",
+    shortLabel: "Topics",
+  },
+  decisions: {
+    anchor: "summary-decisions",
+    chipClass:
+      "border-brand/25 text-brand-deeper hover:border-brand hover:bg-brand-soft/60",
+    indexClass: "text-brand-deep",
+    label: "Decisions",
+    ruleClass: "bg-brand",
+    shortLabel: "Decisions",
+  },
+  actions: {
+    anchor: "summary-action-items",
+    chipClass:
+      "border-accent/25 text-accent-deep hover:border-accent hover:bg-accent-soft/60",
+    indexClass: "text-accent-deep",
+    label: "Action items",
+    ruleClass: "bg-accent",
+    shortLabel: "Actions",
+  },
+  questions: {
+    anchor: "summary-open-questions",
+    chipClass:
+      "border-warning/30 text-warning hover:border-warning hover:bg-warning-soft/70",
+    indexClass: "text-warning",
+    label: "Open questions",
+    ruleClass: "bg-warning",
+    shortLabel: "Questions",
+  },
+};
+
+const SUMMARY_GLANCE_ORDER: SummarySectionId[] = [
+  "topics",
+  "decisions",
+  "actions",
+  "questions",
+];
+
+function SummaryGlance({
+  counts,
 }: {
-  emptyText: string;
-  items: { content: string; id: string; meta?: string }[];
-  title: string;
+  counts: Record<SummarySectionId, number>;
 }) {
+  const total = SUMMARY_GLANCE_ORDER.reduce((sum, id) => sum + counts[id], 0);
+
+  if (total === 0) {
+    return null;
+  }
+
   return (
-    <section>
-      <h3 className="text-ink text-sm font-medium">{title}</h3>
-      {items.length === 0 ? (
-        <p className="text-ink-muted mt-3 text-sm leading-6">{emptyText}</p>
-      ) : (
-        <ol className="mt-3 space-y-2.5">
-          {items.map((item) => (
-            <li
-              className="flex items-start gap-2.5 text-sm leading-6"
-              key={item.id}
-            >
-              <span
-                aria-hidden="true"
-                className="bg-brand mt-2 size-1 shrink-0 rounded-full"
-              />
-              <span className="text-ink-soft min-w-0 flex-1">
-                {item.content}
-              </span>
-              {item.meta ? (
-                <span className="text-ink-muted shrink-0 font-mono text-[11px] tabular-nums">
-                  {item.meta}
+    <nav
+      aria-label="Jump to summary section"
+      className="border-hairline bg-surface-sunken/40 rounded-xl border p-1.5"
+    >
+      <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        {SUMMARY_GLANCE_ORDER.map((id) => {
+          const meta = SUMMARY_SECTION_META[id];
+          const count = counts[id];
+          const isEmpty = count === 0;
+
+          return (
+            <li key={id}>
+              <a
+                aria-disabled={isEmpty || undefined}
+                aria-label={`Jump to ${meta.label} (${count})`}
+                className={`group bg-surface focus-visible:ring-ink focus-visible:ring-offset-canvas relative flex h-full flex-col items-start justify-between gap-3 rounded-lg border px-3.5 py-3 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+                  isEmpty
+                    ? "text-ink-subtle pointer-events-none border-transparent opacity-50"
+                    : meta.chipClass
+                }`}
+                href={isEmpty ? undefined : `#${meta.anchor}`}
+                onClick={(event) => {
+                  if (isEmpty) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <span className="font-display text-3xl leading-none font-medium tracking-tight tabular-nums sm:text-[2rem]">
+                  {count}
                 </span>
-              ) : null}
+                <span className="flex w-full items-baseline justify-between gap-2">
+                  <span className="font-mono text-[10px] tracking-[0.16em] uppercase">
+                    {meta.shortLabel}
+                  </span>
+                  {isEmpty ? null : (
+                    <Icon
+                      className="size-3 shrink-0 -translate-y-px opacity-40 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:opacity-100"
+                      name="chevron-right"
+                    />
+                  )}
+                </span>
+              </a>
             </li>
-          ))}
-        </ol>
-      )}
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+function SummaryOverview({
+  speakerMap,
+  text,
+}: {
+  speakerMap: SpeakerMap;
+  text: string;
+}) {
+  const mappedText = applySpeakerMap(text, speakerMap).trim();
+
+  if (mappedText.length === 0) {
+    return null;
+  }
+
+  return (
+    <section aria-labelledby="summary-overview-heading" className={cardClass}>
+      <header className="flex items-center gap-3">
+        <h3
+          className="text-ink-muted font-mono text-[11px] font-medium tracking-[0.16em] uppercase"
+          id="summary-overview-heading"
+        >
+          Overview
+        </h3>
+        <span aria-hidden="true" className="bg-hairline h-px flex-1" />
+      </header>
+      <p className="text-ink-soft mt-5 text-[15px] leading-[1.75] whitespace-pre-line">
+        {mappedText}
+      </p>
     </section>
   );
 }
 
-function ActionItemsList({
+function SummarySection<T>({
+  emptyText,
   items,
-  speakerMap,
+  renderItem,
+  sectionId,
 }: {
-  items: SummaryActionItem[];
-  speakerMap: SpeakerMap;
+  emptyText: string;
+  items: T[];
+  renderItem: (item: T, index: number) => React.ReactNode;
+  sectionId: SummarySectionId;
 }) {
+  const meta = SUMMARY_SECTION_META[sectionId];
+  const [isExpanded, setIsExpanded] = useState(true);
+  const isEmpty = items.length === 0;
+  const headingId = `${meta.anchor}-heading`;
+  const listId = `${meta.anchor}-list`;
+
   return (
-    <section>
-      <h3 className="text-ink text-sm font-medium">Action items</h3>
-      {items.length === 0 ? (
-        <p className="text-ink-muted mt-3 text-sm leading-6">
-          No action items recorded.
-        </p>
-      ) : (
-        <ol className="mt-3 space-y-3">
-          {items.slice(0, 4).map((item, index) => (
-            <li className="flex gap-2.5" key={`action-item-${index}`}>
+    <section
+      aria-labelledby={headingId}
+      className={`${cardClass} scroll-mt-6`}
+      id={meta.anchor}
+    >
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span
+          aria-hidden="true"
+          className={`block h-4 w-1 rounded-full ${meta.ruleClass}`}
+        />
+        <h3
+          className="text-ink font-mono text-[11px] font-medium tracking-[0.16em] uppercase"
+          id={headingId}
+        >
+          {meta.label}
+        </h3>
+        <span className="text-ink-muted font-mono text-[11px] tabular-nums">
+          {items.length}
+        </span>
+        <span aria-hidden="true" className="bg-hairline h-px flex-1" />
+        {isEmpty ? null : (
+          <button
+            aria-controls={listId}
+            aria-expanded={isExpanded}
+            aria-label={
+              isExpanded ? `Hide ${meta.label}` : `Show ${meta.label}`
+            }
+            className="border-hairline text-ink-muted hover:border-ink hover:text-ink inline-flex size-7 items-center justify-center rounded-full border bg-transparent transition"
+            onClick={() => setIsExpanded((previous) => !previous)}
+            type="button"
+          >
+            <Icon
+              className={`size-3 transition-transform duration-200 ${
+                isExpanded ? "rotate-180" : ""
+              }`}
+              name="chevron-down"
+            />
+          </button>
+        )}
+      </header>
+
+      {isEmpty ? (
+        <p className="text-ink-muted mt-5 text-sm leading-6">{emptyText}</p>
+      ) : isExpanded ? (
+        <ol className="mt-5 space-y-3.5" id={listId}>
+          {items.map((item, index) => (
+            <li
+              className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-x-3 sm:grid-cols-[2rem_minmax(0,1fr)]"
+              key={`${meta.anchor}-${index}`}
+            >
               <span
                 aria-hidden="true"
-                className="bg-success-soft text-success mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full"
+                className={`pt-[3px] font-mono text-[11px] tracking-[0.04em] tabular-nums ${meta.indexClass}`}
               >
-                <Icon className="size-2.5" name="check" />
+                {String(index + 1).padStart(2, "0")}
               </span>
-              <div className="min-w-0">
-                <p className="text-ink-soft text-sm leading-5">
-                  {applySpeakerMap(item.task, speakerMap)}
-                </p>
-                <p className="text-ink-muted mt-1 text-xs">
-                  Owner: {renderActionItemOwner(item.owner, speakerMap)}
-                </p>
-              </div>
+              <div className="min-w-0">{renderItem(item, index)}</div>
             </li>
           ))}
         </ol>
-      )}
+      ) : null}
     </section>
   );
 }
