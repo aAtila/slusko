@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, sql as drizzleSql, eq } from "drizzle-orm";
 import {
   meetings,
   speakerMappings,
@@ -9,6 +9,11 @@ import {
   type SummaryRegenerationStatus,
 } from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
+import {
+  meetingLanguageValidationMessage,
+  parseMeetingLanguageFormValue,
+  type MeetingLanguage,
+} from "./meeting-language";
 import { removeMeetingDirectory as removeMeetingStorageDirectory } from "./meeting-storage.server";
 import {
   getMeetingFailurePresentation,
@@ -49,6 +54,11 @@ export type RetryMeetingResult = {
   resumeFromStage: MeetingStatus;
 };
 
+export type UpdateMeetingLanguageResult = {
+  id: string;
+  language: MeetingLanguage;
+};
+
 export type RegenerateSummaryResult = {
   id: string;
 };
@@ -59,6 +69,8 @@ type MeetingFailureRow = {
   errorKind: ErrorKind | null;
   errorMessage: string | null;
   failedAtStage: MeetingStatus | null;
+  language: MeetingLanguage;
+  detectedLanguage: string | null;
 };
 
 type RetryMeetingUpdate = {
@@ -68,6 +80,8 @@ type RetryMeetingUpdate = {
   failedAtStage: null;
   resumeFromStage: MeetingStatus;
   transcriptionProgress: null;
+  language: MeetingLanguage;
+  clearDetectedLanguage: boolean;
 };
 
 type DeleteMeetingOptions = {
@@ -81,6 +95,29 @@ type UpdateMeetingTitleOptions = {
     meetingId: string,
     title: string,
   ) => Promise<UpdateMeetingTitleResult | null>;
+};
+
+type MeetingStatusRow = {
+  id: string;
+  status: MeetingStatus;
+  language: MeetingLanguage;
+  resumeFromStage: MeetingStatus | null;
+};
+
+type UpdateMeetingLanguagePersistence = {
+  language: MeetingLanguage;
+  resumeFromStage: MeetingStatus | null;
+  clearDetectedLanguage: boolean;
+};
+
+type UpdateMeetingLanguageOptions = {
+  findMeetingStatusById?: (
+    meetingId: string,
+  ) => Promise<MeetingStatusRow | null>;
+  updateMeetingLanguageById?: (
+    meetingId: string,
+    update: UpdateMeetingLanguagePersistence,
+  ) => Promise<UpdateMeetingLanguageResult | null>;
 };
 
 type SaveSpeakerMappingOptions = {
@@ -217,6 +254,59 @@ export async function updateMeetingTitle(
   return result;
 }
 
+export async function updateMeetingLanguage(
+  input: { meetingId: string | undefined; language: unknown },
+  options: UpdateMeetingLanguageOptions = {},
+): Promise<UpdateMeetingLanguageResult> {
+  if (!isMeetingId(input.meetingId)) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  if (
+    input.language === undefined ||
+    input.language === null ||
+    input.language === ""
+  ) {
+    throw new MeetingMutationError(meetingLanguageValidationMessage, 400);
+  }
+
+  const parsedLanguage = parseMeetingLanguageFormValue(input.language);
+
+  if (!parsedLanguage.ok) {
+    throw new MeetingMutationError(parsedLanguage.error, 400);
+  }
+
+  const findStatus = options.findMeetingStatusById ?? findMeetingStatusById;
+  const meeting = await findStatus(input.meetingId);
+
+  if (meeting === null) {
+    throw new MeetingMutationError("Meeting not found", 404);
+  }
+
+  assertCanUpdateMeetingLanguage(meeting);
+
+  const result = await (
+    options.updateMeetingLanguageById ?? updateLanguageById
+  )(meeting.id, createPendingLanguageUpdate(meeting, parsedLanguage.language));
+
+  if (result === null) {
+    const currentMeeting = await findStatus(input.meetingId);
+
+    if (currentMeeting === null) {
+      throw new MeetingMutationError("Meeting not found", 404);
+    }
+
+    assertCanUpdateMeetingLanguage(currentMeeting);
+
+    throw new MeetingMutationError(
+      "Could not update language. Please try again.",
+      400,
+    );
+  }
+
+  return result;
+}
+
 export async function regenerateSummary(
   input: { meetingId: string | undefined },
   options: RegenerateSummaryOptions = {},
@@ -262,7 +352,7 @@ export async function regenerateSummary(
 }
 
 export async function retryMeeting(
-  input: { meetingId: string | undefined },
+  input: { meetingId: string | undefined; language?: unknown },
   options: RetryMeetingOptions = {},
 ): Promise<RetryMeetingResult> {
   if (!isMeetingId(input.meetingId)) {
@@ -297,9 +387,17 @@ export async function retryMeeting(
     );
   }
 
+  const parsedLanguage = parseMeetingLanguageFormValue(input.language, {
+    defaultWhenMissing: meeting.language,
+  });
+
+  if (!parsedLanguage.ok) {
+    throw new MeetingMutationError(parsedLanguage.error, 400);
+  }
+
   const result = await (options.retryMeetingById ?? retryMeetingById)(
     meeting.id,
-    createRetryMeetingUpdate(meeting.failedAtStage),
+    createRetryMeetingUpdate(meeting, parsedLanguage.language),
   );
 
   if (result === null) {
@@ -307,6 +405,39 @@ export async function retryMeeting(
   }
 
   return result;
+}
+
+function assertCanUpdateMeetingLanguage(meeting: MeetingStatusRow) {
+  if (meeting.status !== "pending") {
+    throw new MeetingMutationError(
+      "Language can only be changed while the meeting is pending.",
+      400,
+    );
+  }
+}
+
+function createPendingLanguageUpdate(
+  meeting: MeetingStatusRow,
+  selectedLanguage: MeetingLanguage,
+): UpdateMeetingLanguagePersistence {
+  const languageChanged = selectedLanguage !== meeting.language;
+  const shouldReTranscribeQueuedRetry =
+    languageChanged &&
+    (meeting.resumeFromStage === "diarizing" ||
+      meeting.resumeFromStage === "summarizing");
+
+  const resumeFromStage = shouldReTranscribeQueuedRetry
+    ? "transcribing"
+    : meeting.resumeFromStage;
+
+  return {
+    language: selectedLanguage,
+    resumeFromStage,
+    clearDetectedLanguage:
+      languageChanged ||
+      resumeFromStage === "normalizing" ||
+      resumeFromStage === "transcribing",
+  };
 }
 
 function assertCanRegenerateSummary(meeting: MeetingSummaryRegenerationRow) {
@@ -336,8 +467,20 @@ function assertCanRegenerateSummary(meeting: MeetingSummaryRegenerationRow) {
 }
 
 function createRetryMeetingUpdate(
-  resumeFromStage: MeetingStatus,
+  meeting: MeetingFailureRow,
+  selectedLanguage: MeetingLanguage,
 ): RetryMeetingUpdate {
+  if (!isRetryableFailedStage(meeting.failedAtStage)) {
+    throw new MeetingMutationError("Only failed meetings can be retried.", 400);
+  }
+
+  const failedAtStage = meeting.failedAtStage;
+  const languageChanged = selectedLanguage !== meeting.language;
+  const resumeFromStage =
+    languageChanged && failedAtStage !== "normalizing"
+      ? "transcribing"
+      : failedAtStage;
+
   return {
     status: "pending",
     errorKind: null,
@@ -345,6 +488,11 @@ function createRetryMeetingUpdate(
     failedAtStage: null,
     resumeFromStage,
     transcriptionProgress: null,
+    language: selectedLanguage,
+    clearDetectedLanguage:
+      languageChanged ||
+      resumeFromStage === "normalizing" ||
+      resumeFromStage === "transcribing",
   };
 }
 
@@ -446,6 +594,26 @@ async function findMeetingFailureById(
       errorKind: meetings.errorKind,
       errorMessage: meetings.errorMessage,
       failedAtStage: meetings.failedAtStage,
+      language: meetings.language,
+      detectedLanguage: meetings.detectedLanguage,
+    })
+    .from(meetings)
+    .where(eq(meetings.id, meetingId))
+    .limit(1);
+
+  return row ?? null;
+}
+
+async function findMeetingStatusById(
+  meetingId: string,
+): Promise<MeetingStatusRow | null> {
+  const database = await getDatabase();
+  const [row] = await database
+    .select({
+      id: meetings.id,
+      status: meetings.status,
+      language: meetings.language,
+      resumeFromStage: meetings.resumeFromStage,
     })
     .from(meetings)
     .where(eq(meetings.id, meetingId))
@@ -527,6 +695,27 @@ async function removeStoredMeetingDirectory(meetingId: string) {
   await removeMeetingStorageDirectory({ meetingId });
 }
 
+async function updateLanguageById(
+  meetingId: string,
+  update: UpdateMeetingLanguagePersistence,
+): Promise<UpdateMeetingLanguageResult | null> {
+  const database = await getDatabase();
+  const [row] = await database
+    .update(meetings)
+    .set({
+      language: update.language,
+      detectedLanguage: update.clearDetectedLanguage
+        ? null
+        : drizzleSql`${meetings.detectedLanguage}`,
+      resumeFromStage: update.resumeFromStage,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(meetings.id, meetingId), eq(meetings.status, "pending")))
+    .returning({ id: meetings.id, language: meetings.language });
+
+  return row ?? null;
+}
+
 async function updateTitleById(
   meetingId: string,
   title: string,
@@ -590,6 +779,11 @@ async function retryMeetingById(
         failed_at_stage = ${update.failedAtStage},
         resume_from_stage = ${update.resumeFromStage},
         transcription_progress = ${update.transcriptionProgress},
+        language = ${update.language},
+        detected_language = case
+          when ${update.clearDetectedLanguage} then null
+          else detected_language
+        end,
         updated_at = now()
       where id = ${meetingId}
         and status = 'error'

@@ -1,9 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ElementType,
+  type FormEvent,
+} from "react";
 import { data, Link, useFetcher } from "react-router";
 import { Icon, type IconName } from "~/components/app-icons";
 import { useAppShellChrome, type AppShellChrome } from "~/components/app-shell";
 import type { MeetingStatus } from "~/db/schema";
+import { formatMeetingLanguageLabel } from "~/lib/meeting-language";
 import {
   formatDuration,
   getMeetingFailurePresentation,
@@ -84,9 +92,12 @@ export async function action({ request }: Route.ActionArgs) {
 export default function Home({ loaderData }: Route.ComponentProps) {
   const queryClient = useQueryClient();
   const fetcher = useFetcher<UploadActionData>();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [clientError, setClientError] = useState<string | null>(null);
   const [isDraggingRecording, setIsDraggingRecording] = useState(false);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [selectedUploadFileName, setSelectedUploadFileName] = useState<
+    string | null
+  >(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>("last-30");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<MeetingStatusFilter>("all");
@@ -108,9 +119,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const completedMeetingsCount = meetings.filter(
     (meeting) => meeting.status === "done",
   ).length;
-  const openFilePicker = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+  const openUploadDialog = useCallback(() => {
+    if (isUploading) {
+      return;
+    }
+
+    setClientError(null);
+    setIsUploadDialogOpen(true);
+  }, [isUploading]);
 
   useEffect(() => {
     queryClient.setQueryData<HomeMeetingsResponse>(homeMeetingsQueryKey, {
@@ -120,6 +136,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data?.ok === true) {
+      setIsUploadDialogOpen(false);
+      setSelectedUploadFileName(null);
       void queryClient.invalidateQueries({ queryKey: homeMeetingsQueryKey });
     }
   }, [fetcher.data, fetcher.state, queryClient]);
@@ -147,6 +165,42 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     },
     [fetcher, isUploading],
   );
+  const handleUploadFormFileChange = useCallback(
+    (file: File | null | undefined) => {
+      setSelectedUploadFileName(file?.name ?? null);
+
+      const validationError = file ? validateRecordingFile(file) : null;
+      setClientError(validationError);
+    },
+    [],
+  );
+
+  const handleUploadFormSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      if (isUploading) {
+        event.preventDefault();
+        setClientError("Wait for the current upload to finish.");
+        return;
+      }
+
+      const formData = new FormData(event.currentTarget);
+      const recording = formData.get("recording");
+      const validationError =
+        recording instanceof File
+          ? validateRecordingFile(recording)
+          : "Choose one recording file to upload.";
+
+      if (validationError !== null) {
+        event.preventDefault();
+        setClientError(validationError);
+        return;
+      }
+
+      setClientError(null);
+    },
+    [isUploading],
+  );
+
   const shellChrome = useMemo<AppShellChrome>(
     () => ({
       dropZone: {
@@ -181,7 +235,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         label: isUploading ? "Uploading..." : "New Meeting",
         ariaLabel: isUploading ? "Uploading meeting" : "New Meeting",
         disabled: isUploading,
-        onClick: openFilePicker,
+        onClick: openUploadDialog,
       },
       storage: {
         description: `${completedMeetingsCount} processed / ${meetings.length} meetings`,
@@ -193,7 +247,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       completedMeetingsCount,
       isUploading,
       meetings.length,
-      openFilePicker,
+      openUploadDialog,
       submitRecording,
     ],
   );
@@ -202,17 +256,16 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
   return (
     <section className="flex min-w-0 flex-1 flex-col px-4 py-5 sm:px-6 md:px-8 lg:px-10 lg:py-11">
-      <input
-        accept={acceptedRecordingTypes}
-        className="sr-only"
-        disabled={isUploading}
-        onChange={(event) => {
-          submitRecording(event.currentTarget.files?.item(0));
-          event.currentTarget.value = "";
-        }}
-        ref={fileInputRef}
-        type="file"
-      />
+      {isUploadDialogOpen ? (
+        <UploadDialog
+          FormComponent={fetcher.Form}
+          isUploading={isUploading}
+          selectedFileName={selectedUploadFileName}
+          onCancel={() => setIsUploadDialogOpen(false)}
+          onFileChange={handleUploadFormFileChange}
+          onSubmit={handleUploadFormSubmit}
+        />
+      ) : null}
       <header className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="font-display text-ink text-[2.5rem] leading-[1.04] font-medium tracking-[-0.015em] sm:text-[3rem]">
@@ -225,7 +278,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         <button
           className="bg-brand text-canvas hover:bg-brand-deep hidden h-12 items-center justify-center gap-2 rounded-lg px-6 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
           disabled={isUploading}
-          onClick={openFilePicker}
+          onClick={openUploadDialog}
           type="button"
         >
           <Icon name="plus" className="size-5" />
@@ -242,7 +295,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       <UploadPanel
         isDraggingRecording={isDraggingRecording}
         isUploading={isUploading}
-        onBrowseFiles={openFilePicker}
+        onBrowseFiles={openUploadDialog}
       />
       <MeetingsToolbar
         dateFilter={dateFilter}
@@ -265,7 +318,120 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function UploadPanel({
+export function UploadDialog({
+  FormComponent = "form",
+  isUploading,
+  selectedFileName,
+  onCancel,
+  onFileChange,
+  onSubmit,
+}: {
+  FormComponent?: ElementType;
+  isUploading: boolean;
+  selectedFileName: string | null;
+  onCancel: () => void;
+  onFileChange: (file: File | null | undefined) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div
+      aria-labelledby="upload-dialog-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6"
+      role="dialog"
+    >
+      <div className="bg-surface border-hairline w-full max-w-lg rounded-2xl border p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2
+              className="font-display text-ink text-2xl font-medium tracking-tight"
+              id="upload-dialog-title"
+            >
+              New Meeting
+            </h2>
+            <p className="text-ink-muted mt-2 text-sm leading-6">
+              Choose a recording and transcription language before queueing it.
+            </p>
+          </div>
+          <button
+            aria-label="Close upload dialog"
+            className="text-ink-muted hover:text-ink rounded-lg p-2 transition disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isUploading}
+            onClick={onCancel}
+            type="button"
+          >
+            <Icon name="plus" className="size-5 rotate-45" />
+          </button>
+        </div>
+
+        <FormComponent
+          className="mt-6 flex flex-col gap-5"
+          encType="multipart/form-data"
+          method="post"
+          onSubmit={onSubmit}
+        >
+          <label className="flex flex-col gap-2" htmlFor="recording-upload">
+            <span className="text-ink text-sm font-medium">Recording</span>
+            <input
+              accept={acceptedRecordingTypes}
+              className="border-hairline bg-surface-elevated text-ink file:bg-brand file:text-canvas focus:border-brand rounded-lg border px-3 py-2 text-sm transition outline-none file:border-0 file:px-4 file:py-2 file:text-sm file:font-medium"
+              disabled={isUploading}
+              id="recording-upload"
+              name="recording"
+              onChange={(event) =>
+                onFileChange(event.currentTarget.files?.item(0))
+              }
+              required
+              type="file"
+            />
+          </label>
+
+          {selectedFileName ? (
+            <p className="text-ink-muted text-sm">
+              Selected: {selectedFileName}
+            </p>
+          ) : null}
+
+          <label className="flex flex-col gap-2" htmlFor="meeting-language">
+            <span className="text-ink text-sm font-medium">
+              Transcription language
+            </span>
+            <select
+              className="border-hairline bg-surface-elevated text-ink focus:border-brand h-11 rounded-lg border px-3 text-sm outline-none"
+              defaultValue="sr"
+              disabled={isUploading}
+              id="meeting-language"
+              name="language"
+            >
+              <option value="sr">Serbian</option>
+              <option value="en">English</option>
+              <option value="auto">Auto-detect</option>
+            </select>
+          </label>
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              className="border-hairline bg-surface-elevated text-ink hover:border-brand/40 inline-flex h-11 items-center justify-center rounded-lg border px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isUploading}
+              onClick={onCancel}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-11 items-center justify-center rounded-lg px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isUploading}
+              type="submit"
+            >
+              {isUploading ? "Uploading..." : "Upload meeting"}
+            </button>
+          </div>
+        </FormComponent>
+      </div>
+    </div>
+  );
+}
+
+export function UploadPanel({
   isDraggingRecording,
   isUploading,
   onBrowseFiles,
@@ -289,7 +455,8 @@ function UploadPanel({
         Drop audio or video files here
       </h2>
       <p className="text-ink-muted mt-2 text-sm leading-6">
-        Supports MP3, WAV, M4A, MP4 and more (max 2 GB)
+        Supports MP3, WAV, M4A, MP4 and more. Dropped files use Serbian by
+        default; browse to choose English or Auto-detect.
       </p>
       <button
         className="border-hairline bg-surface-elevated text-ink hover:border-brand/40 mt-4 inline-flex h-12 items-center justify-center gap-2 rounded-lg border px-6 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
@@ -512,6 +679,11 @@ export function MeetingRow({
   meeting: HomeMeetingListItem;
 }) {
   const failurePresentation = getMeetingFailurePresentation(meeting);
+  const languageLabel = formatMeetingLanguageLabel(meeting);
+  const durationLabel =
+    meeting.durationSeconds !== null
+      ? formatDuration(meeting.durationSeconds)
+      : "Pending";
 
   return (
     <li>
@@ -537,9 +709,9 @@ export function MeetingRow({
         </p>
         <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
           <Icon name="clock" className="size-4" />
-          {meeting.durationSeconds !== null
-            ? formatDuration(meeting.durationSeconds)
-            : "Pending"}
+          <span>{durationLabel}</span>
+          <span className="text-ink-subtle font-sans">·</span>
+          <span className="font-sans">{languageLabel}</span>
         </p>
         <StatusBadge
           progress={meeting.transcriptionProgress}
@@ -558,6 +730,11 @@ export function MeetingCard({
   meeting: HomeMeetingListItem;
 }) {
   const failurePresentation = getMeetingFailurePresentation(meeting);
+  const languageLabel = formatMeetingLanguageLabel(meeting);
+  const durationLabel =
+    meeting.durationSeconds !== null
+      ? formatDuration(meeting.durationSeconds)
+      : "Pending";
 
   return (
     <li>
@@ -582,9 +759,9 @@ export function MeetingCard({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
             <Icon name="clock" className="size-4" />
-            {meeting.durationSeconds !== null
-              ? formatDuration(meeting.durationSeconds)
-              : "Pending"}
+            <span>{durationLabel}</span>
+            <span className="text-ink-subtle font-sans">·</span>
+            <span className="font-sans">{languageLabel}</span>
           </p>
           <StatusBadge
             progress={meeting.transcriptionProgress}

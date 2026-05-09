@@ -18,6 +18,8 @@ function detailRow(
     status: "error",
     transcriptionProgress: null,
     durationSeconds: 125,
+    language: "sr",
+    detectedLanguage: null,
     errorKind: "normalization_failed",
     errorMessage: "ffmpeg could not read original.m4a",
     failedAtStage: "normalizing",
@@ -72,6 +74,8 @@ describe("meeting detail loader helpers", () => {
       status: "error",
       transcriptionProgress: null,
       durationSeconds: 125,
+      language: "sr",
+      detectedLanguage: null,
       errorKind: "normalization_failed",
       errorMessage: "ffmpeg could not read original.m4a",
       failedAtStage: "normalizing",
@@ -79,6 +83,20 @@ describe("meeting detail loader helpers", () => {
       updatedAt: "2026-05-05T10:02:00.000Z",
       summaryRegenerationStatus: "idle",
       summaryRegenerationProcessingStartedAt: null,
+    });
+  });
+
+  test("serializes meeting language fields", async () => {
+    const meeting = await loadMeetingDetail(meetingId, {
+      findMeetingById: async (id) =>
+        id === meetingId
+          ? detailRow({ language: null, detectedLanguage: "hr" })
+          : null,
+    });
+
+    expect(meeting).toMatchObject({
+      language: null,
+      detectedLanguage: "hr",
     });
   });
 

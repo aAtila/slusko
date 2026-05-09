@@ -2,6 +2,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, mock, test } from "bun:test";
+import type { MeetingStatus } from "~/db/schema";
 import { removeMeetingDirectory } from "./meeting-storage.server";
 import {
   deleteMeetingAndArtifacts,
@@ -9,6 +10,7 @@ import {
   regenerateSummary,
   retryMeeting,
   saveSpeakerMapping,
+  updateMeetingLanguage,
   updateMeetingTitle,
 } from "./meetings-mutations.server";
 
@@ -470,6 +472,8 @@ describe("meeting retry mutations", () => {
         failedAtStage: null;
         resumeFromStage: string;
         transcriptionProgress: null;
+        language: "sr" | "en" | null;
+        clearDetectedLanguage: boolean;
       };
     }> = [];
 
@@ -482,6 +486,8 @@ describe("meeting retry mutations", () => {
           errorKind: "diarization_failed",
           errorMessage: "speaker clustering failed",
           failedAtStage: "diarizing",
+          language: "sr",
+          detectedLanguage: null,
         }),
         retryMeetingById: async (id, update) => {
           persistedRows.push({ meetingId: id, update });
@@ -501,6 +507,8 @@ describe("meeting retry mutations", () => {
           failedAtStage: null,
           resumeFromStage: "diarizing",
           transcriptionProgress: null,
+          language: "sr",
+          clearDetectedLanguage: false,
         },
       },
     ]);
@@ -546,6 +554,8 @@ describe("meeting retry mutations", () => {
           errorKind: "diarization_failed",
           errorMessage: "speaker clustering failed",
           failedAtStage: "diarizing",
+          language: "sr",
+          detectedLanguage: null,
         }),
       },
     );
@@ -625,7 +635,12 @@ describe("meeting retry mutations", () => {
         retryMeeting(
           { meetingId },
           {
-            findMeetingFailureById: async (id) => ({ id, ...input }),
+            findMeetingFailureById: async (id) => ({
+              id,
+              ...input,
+              language: "sr",
+              detectedLanguage: null,
+            }),
             retryMeetingById: async () => {
               retryWasCalled = true;
               return { id: meetingId, resumeFromStage: "diarizing" };
@@ -675,6 +690,8 @@ describe("meeting retry mutations", () => {
               id,
               status: "error",
               ...failure,
+              language: "sr",
+              detectedLanguage: null,
             }),
             retryMeetingById: async () => {
               retryWasCalled = true;
@@ -689,9 +706,385 @@ describe("meeting retry mutations", () => {
       expect(retryWasCalled).toBe(false);
     }
   });
+
+  test("retry with changed language resumes from transcription and clears detected language", async () => {
+    const persistedRows: Array<{
+      language: "sr" | "en" | null;
+      resumeFromStage: MeetingStatus;
+      clearDetectedLanguage: boolean;
+    }> = [];
+
+    const result = await retryMeeting(
+      { meetingId, language: "en" },
+      {
+        findMeetingFailureById: async (id) => ({
+          id,
+          status: "error",
+          errorKind: "diarization_failed",
+          errorMessage: "speaker clustering failed",
+          failedAtStage: "diarizing",
+          language: "sr",
+          detectedLanguage: null,
+        }),
+        retryMeetingById: async (id, update) => {
+          persistedRows.push({
+            language: update.language,
+            resumeFromStage: update.resumeFromStage,
+            clearDetectedLanguage: update.clearDetectedLanguage,
+          });
+          return { id, resumeFromStage: update.resumeFromStage };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, resumeFromStage: "transcribing" });
+    expect(persistedRows).toEqual([
+      {
+        language: "en",
+        resumeFromStage: "transcribing",
+        clearDetectedLanguage: true,
+      },
+    ]);
+  });
+
+  test("retry with changed language from normalization resumes from normalization", async () => {
+    const persistedRows: Array<{
+      language: "sr" | "en" | null;
+      resumeFromStage: MeetingStatus;
+      clearDetectedLanguage: boolean;
+    }> = [];
+
+    const result = await retryMeeting(
+      { meetingId, language: "auto" },
+      {
+        findMeetingFailureById: async (id) => ({
+          id,
+          status: "error",
+          errorKind: "normalization_failed",
+          errorMessage: "ffmpeg failed",
+          failedAtStage: "normalizing",
+          language: "sr",
+          detectedLanguage: null,
+        }),
+        retryMeetingById: async (id, update) => {
+          persistedRows.push({
+            language: update.language,
+            resumeFromStage: update.resumeFromStage,
+            clearDetectedLanguage: update.clearDetectedLanguage,
+          });
+          return { id, resumeFromStage: update.resumeFromStage };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, resumeFromStage: "normalizing" });
+    expect(persistedRows).toEqual([
+      {
+        language: null,
+        resumeFromStage: "normalizing",
+        clearDetectedLanguage: true,
+      },
+    ]);
+  });
+
+  test("retry with unchanged later stage language preserves detected language", async () => {
+    const persistedRows: Array<{
+      language: "sr" | "en" | null;
+      resumeFromStage: MeetingStatus;
+      clearDetectedLanguage: boolean;
+    }> = [];
+
+    await retryMeeting(
+      { meetingId, language: "auto" },
+      {
+        findMeetingFailureById: async (id) => ({
+          id,
+          status: "error",
+          errorKind: "summarization_failed",
+          errorMessage: "summary failed",
+          failedAtStage: "summarizing",
+          language: null,
+          detectedLanguage: "sr",
+        }),
+        retryMeetingById: async (id, update) => {
+          persistedRows.push({
+            language: update.language,
+            resumeFromStage: update.resumeFromStage,
+            clearDetectedLanguage: update.clearDetectedLanguage,
+          });
+          return { id, resumeFromStage: update.resumeFromStage };
+        },
+      },
+    );
+
+    expect(persistedRows).toEqual([
+      {
+        language: null,
+        resumeFromStage: "summarizing",
+        clearDetectedLanguage: false,
+      },
+    ]);
+  });
+
+  test("rejects invalid retry language before retry persistence", async () => {
+    let retryWasCalled = false;
+
+    const emptyError = await captureMeetingMutationError(
+      retryMeeting(
+        { meetingId, language: "" },
+        {
+          findMeetingFailureById: async (id) => ({
+            id,
+            status: "error",
+            errorKind: "diarization_failed",
+            errorMessage: "speaker clustering failed",
+            failedAtStage: "diarizing",
+            language: "sr",
+            detectedLanguage: null,
+          }),
+          retryMeetingById: async () => {
+            retryWasCalled = true;
+            return { id: meetingId, resumeFromStage: "diarizing" };
+          },
+        },
+      ),
+    );
+
+    const error = await captureMeetingMutationError(
+      retryMeeting(
+        { meetingId, language: "de" },
+        {
+          findMeetingFailureById: async (id) => ({
+            id,
+            status: "error",
+            errorKind: "diarization_failed",
+            errorMessage: "speaker clustering failed",
+            failedAtStage: "diarizing",
+            language: "sr",
+            detectedLanguage: null,
+          }),
+          retryMeetingById: async () => {
+            retryWasCalled = true;
+            return { id: meetingId, resumeFromStage: "diarizing" };
+          },
+        },
+      ),
+    );
+
+    expect(emptyError.status).toBe(400);
+    expect(emptyError.message).toBe("Choose Serbian, English, or Auto-detect.");
+    expect(error.status).toBe(400);
+    expect(error.message).toBe("Choose Serbian, English, or Auto-detect.");
+    expect(retryWasCalled).toBe(false);
+  });
 });
 
 describe("meeting metadata mutations", () => {
+  test("updates language for a pending meeting and clears detected language", async () => {
+    const updates: Array<{
+      id: string;
+      language: "sr" | "en" | null;
+      resumeFromStage: MeetingStatus | null;
+      clearDetectedLanguage: boolean;
+    }> = [];
+
+    const result = await updateMeetingLanguage(
+      { meetingId, language: "auto" },
+      {
+        findMeetingStatusById: async (id) => ({
+          id,
+          status: "pending",
+          language: "sr",
+          resumeFromStage: null,
+        }),
+        updateMeetingLanguageById: async (id, update) => {
+          updates.push({ id, ...update });
+          return { id, language: update.language };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, language: null });
+    expect(updates).toEqual([
+      {
+        id: meetingId,
+        language: null,
+        resumeFromStage: null,
+        clearDetectedLanguage: true,
+      },
+    ]);
+  });
+
+  test("changing language on a pending later-stage retry forces transcription resume", async () => {
+    const updates: Array<{
+      language: "sr" | "en" | null;
+      resumeFromStage: MeetingStatus | null;
+      clearDetectedLanguage: boolean;
+    }> = [];
+
+    const result = await updateMeetingLanguage(
+      { meetingId, language: "en" },
+      {
+        findMeetingStatusById: async (id) => ({
+          id,
+          status: "pending",
+          language: "sr",
+          resumeFromStage: "diarizing",
+        }),
+        updateMeetingLanguageById: async (id, update) => {
+          updates.push(update);
+          return { id, language: update.language };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, language: "en" });
+    expect(updates).toEqual([
+      {
+        language: "en",
+        resumeFromStage: "transcribing",
+        clearDetectedLanguage: true,
+      },
+    ]);
+  });
+
+  test("saving the same language on a pending later-stage retry preserves detected language", async () => {
+    const updates: Array<{
+      language: "sr" | "en" | null;
+      resumeFromStage: MeetingStatus | null;
+      clearDetectedLanguage: boolean;
+    }> = [];
+
+    const result = await updateMeetingLanguage(
+      { meetingId, language: "auto" },
+      {
+        findMeetingStatusById: async (id) => ({
+          id,
+          status: "pending",
+          language: null,
+          resumeFromStage: "summarizing",
+        }),
+        updateMeetingLanguageById: async (id, update) => {
+          updates.push(update);
+          return { id, language: update.language };
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: meetingId, language: null });
+    expect(updates).toEqual([
+      {
+        language: null,
+        resumeFromStage: "summarizing",
+        clearDetectedLanguage: false,
+      },
+    ]);
+  });
+
+  test("rejects invalid or missing language values before persisting", async () => {
+    let updateWasCalled = false;
+
+    const missingError = await captureMeetingMutationError(
+      updateMeetingLanguage(
+        { meetingId, language: null },
+        {
+          findMeetingStatusById: async (id) => ({
+            id,
+            status: "pending",
+            language: "sr",
+            resumeFromStage: null,
+          }),
+          updateMeetingLanguageById: async () => {
+            updateWasCalled = true;
+            return { id: meetingId, language: "sr" };
+          },
+        },
+      ),
+    );
+
+    const error = await captureMeetingMutationError(
+      updateMeetingLanguage(
+        { meetingId, language: "de" },
+        {
+          findMeetingStatusById: async (id) => ({
+            id,
+            status: "pending",
+            language: "sr",
+            resumeFromStage: null,
+          }),
+          updateMeetingLanguageById: async () => {
+            updateWasCalled = true;
+            return { id: meetingId, language: "sr" };
+          },
+        },
+      ),
+    );
+
+    expect(missingError.status).toBe(400);
+    expect(missingError.message).toBe(
+      "Choose Serbian, English, or Auto-detect.",
+    );
+    expect(error.status).toBe(400);
+    expect(error.message).toBe("Choose Serbian, English, or Auto-detect.");
+    expect(updateWasCalled).toBe(false);
+  });
+
+  test("rejects language updates for non-pending meetings", async () => {
+    for (const status of ["normalizing", "done", "error"] as const) {
+      let updateWasCalled = false;
+      const error = await captureMeetingMutationError(
+        updateMeetingLanguage(
+          { meetingId, language: "en" },
+          {
+            findMeetingStatusById: async (id) => ({
+              id,
+              status,
+              language: "sr",
+              resumeFromStage: null,
+            }),
+            updateMeetingLanguageById: async () => {
+              updateWasCalled = true;
+              return { id: meetingId, language: "en" };
+            },
+          },
+        ),
+      );
+
+      expect(error.status).toBe(400);
+      expect(error.message).toBe(
+        "Language can only be changed while the meeting is pending.",
+      );
+      expect(updateWasCalled).toBe(false);
+    }
+  });
+
+  test("returns current status gate when pending language update loses a race", async () => {
+    const observedStatuses: MeetingStatus[] = ["pending", "transcribing"];
+
+    const error = await captureMeetingMutationError(
+      updateMeetingLanguage(
+        { meetingId, language: "en" },
+        {
+          findMeetingStatusById: async (id) => {
+            const status = observedStatuses.shift();
+
+            if (status === undefined) {
+              throw new Error("unexpected extra language status lookup");
+            }
+
+            return { id, status, language: "sr", resumeFromStage: null };
+          },
+          updateMeetingLanguageById: async () => null,
+        },
+      ),
+    );
+
+    expect(error.status).toBe(400);
+    expect(error.message).toBe(
+      "Language can only be changed while the meeting is pending.",
+    );
+  });
+
   test("trims and persists an updated meeting title", async () => {
     const updates: Array<{ id: string; title: string }> = [];
 

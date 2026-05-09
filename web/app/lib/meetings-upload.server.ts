@@ -6,6 +6,11 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import busboy from "busboy";
 import {
+  defaultMeetingLanguage,
+  parseMeetingLanguageFormValue,
+  type MeetingLanguage,
+} from "./meeting-language";
+import {
   getMeetingsStorageRoot,
   removeMeetingDirectory,
 } from "./meeting-storage.server";
@@ -19,6 +24,7 @@ export type PendingMeetingUpload = {
   sourceFilename: string;
   title: string;
   uploadedBy: string;
+  language: MeetingLanguage;
 };
 
 type CreatePendingMeetingUploadOptions = {
@@ -34,6 +40,7 @@ type StoredRecordingUpload = {
   originalPath: string;
   sourceFilename: string;
   title: string;
+  language: MeetingLanguage;
 };
 
 export class MeetingUploadError extends Error {
@@ -75,6 +82,7 @@ export async function createPendingMeetingFromUpload(
       sourceFilename: storedUpload.sourceFilename,
       title: storedUpload.title,
       uploadedBy,
+      language: storedUpload.language,
     } satisfies PendingMeetingUpload;
 
     await (options.enqueuePendingMeeting ?? insertAndNotifyPendingMeeting)(
@@ -124,7 +132,7 @@ async function streamSingleRecordingToDisk(
     parser = busboy({
       headers: { "content-type": contentType },
       limits: {
-        fields: 0,
+        fields: 1,
         fileSize: maxUploadBytes,
         files: 1,
       },
@@ -138,7 +146,9 @@ async function streamSingleRecordingToDisk(
   return new Promise((resolve, reject) => {
     const fileWrites: Promise<void>[] = [];
     let fileSeen = false;
-    let storedUpload: StoredRecordingUpload | null = null;
+    let storedUpload: Omit<StoredRecordingUpload, "language"> | null = null;
+    let language: MeetingLanguage | undefined;
+    let languageSeen = false;
     let settled = false;
     let uploadError: Error | null = null;
 
@@ -202,20 +212,34 @@ async function streamSingleRecordingToDisk(
       fileWrites.push(write);
     });
 
-    parser.on("field", () => {
-      fail(
-        new MeetingUploadError(
-          "Upload one recording file without extra form fields.",
-        ),
-      );
+    parser.on("field", (fieldName, value) => {
+      if (fieldName !== "language") {
+        fail(
+          new MeetingUploadError(
+            "Upload one recording file with only the optional language field.",
+          ),
+        );
+        return;
+      }
+
+      if (languageSeen) {
+        fail(new MeetingUploadError("Choose one meeting language."));
+        return;
+      }
+
+      languageSeen = true;
+      const parsedLanguage = parseMeetingLanguageFormValue(value);
+
+      if (!parsedLanguage.ok) {
+        fail(new MeetingUploadError(parsedLanguage.error));
+        return;
+      }
+
+      language = parsedLanguage.language;
     });
 
     parser.on("fieldsLimit", () => {
-      fail(
-        new MeetingUploadError(
-          "Upload one recording file without extra form fields.",
-        ),
-      );
+      fail(new MeetingUploadError("Choose one meeting language."));
     });
 
     parser.on("filesLimit", () => {
@@ -246,7 +270,11 @@ async function streamSingleRecordingToDisk(
             return;
           }
 
-          resolve(storedUpload);
+          resolve({
+            ...storedUpload,
+            language:
+              language === undefined ? defaultMeetingLanguage : language,
+          });
         })
         .catch(reject);
     });
@@ -281,12 +309,13 @@ async function insertAndNotifyPendingMeeting(meeting: PendingMeetingUpload) {
 
   await sqlClient.begin(async (sql) => {
     await sql`
-      insert into meetings (id, title, source_filenames, uploaded_by, status)
+      insert into meetings (id, title, source_filenames, uploaded_by, language, status)
       values (
         ${meeting.id},
         ${meeting.title},
         ${sql.array([meeting.sourceFilename], 25)},
         ${meeting.uploadedBy},
+        ${meeting.language},
         'pending'
       )
     `;

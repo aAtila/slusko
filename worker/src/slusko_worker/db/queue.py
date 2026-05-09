@@ -19,6 +19,7 @@ from slusko_worker.db.models import (
     SummaryDraft,
     SummaryOpenQuestionDraft,
     SummaryRegenerationStatus,
+    TranscriptionLanguage,
     TranscriptSegmentDraft,
 )
 
@@ -47,7 +48,9 @@ with pipeline_candidate as (
     error_message,
     failed_at_stage,
     summary_regeneration_status,
-    summary_regeneration_processing_started_at
+    summary_regeneration_processing_started_at,
+    language,
+    detected_language
   from meetings
   where status = 'pending'
     or (
@@ -72,7 +75,9 @@ with pipeline_candidate as (
     error_message,
     failed_at_stage,
     summary_regeneration_status,
-    summary_regeneration_processing_started_at
+    summary_regeneration_processing_started_at,
+    language,
+    detected_language
   from meetings
   where not exists (select 1 from pipeline_candidate)
     and status = 'done'
@@ -135,7 +140,9 @@ with pipeline_candidate as (
     case when candidate.claimed_status = 'pending' then null else candidate.error_message end as error_message,
     case when candidate.claimed_status = 'pending' then null else candidate.failed_at_stage end as failed_at_stage,
     meeting.summary_regeneration_status,
-    meeting.summary_regeneration_processing_started_at
+    meeting.summary_regeneration_processing_started_at,
+    meeting.language,
+    meeting.detected_language
 )
 select * from claimed
 """
@@ -166,6 +173,7 @@ set
   resume_from_stage = null,
   duration_seconds = coalesce(%(duration_seconds)s, duration_seconds),
   transcription_progress = 0,
+  detected_language = null,
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
@@ -209,6 +217,7 @@ set
   status = 'diarizing',
   resume_from_stage = null,
   transcription_progress = 100,
+  detected_language = %(detected_language)s,
   error_kind = null,
   error_message = null,
   failed_at_stage = null,
@@ -439,11 +448,13 @@ class PostgresMeetingQueue:
         *,
         meeting: QueuedMeeting,
         segments: Sequence[TranscriptSegmentDraft],
+        detected_language: str | None = None,
     ) -> None:
         """Replace transcript rows and hand the meeting to diarization."""
 
         if not segments:
             raise ValueError("at least one transcript segment is required")
+        persisted_detected_language = detected_language if meeting.language is None else None
 
         with self._connection_factory() as connection:
             with connection.transaction():
@@ -451,7 +462,10 @@ class PostgresMeetingQueue:
                     _replace_transcript_segments(cursor, meeting=meeting, segments=segments)
                     cursor.execute(
                         MARK_TRANSCRIPTION_SUCCEEDED_SQL,
-                        {"meeting_id": meeting.id},
+                        {
+                            "meeting_id": meeting.id,
+                            "detected_language": persisted_detected_language,
+                        },
                     )
                     if cursor.rowcount != 1:
                         raise RuntimeError(
@@ -698,6 +712,8 @@ def _meeting_from_row(row: dict[str, object]) -> QueuedMeeting:
         summary_regeneration_processing_started_at=row.get(
             "summary_regeneration_processing_started_at"
         ),
+        language=_maybe_transcription_language(row.get("language")),
+        detected_language=row.get("detected_language"),
     )
 
 
@@ -726,6 +742,12 @@ def _maybe_summary_regeneration_status(value: object) -> SummaryRegenerationStat
     if value is None:
         return SummaryRegenerationStatus.IDLE
     return SummaryRegenerationStatus(value)
+
+
+def _maybe_transcription_language(value: object) -> TranscriptionLanguage | None:
+    if value is None:
+        return None
+    return TranscriptionLanguage(value)
 
 
 def _failed_stage_for_stub(status: MeetingStatus) -> MeetingStatus:

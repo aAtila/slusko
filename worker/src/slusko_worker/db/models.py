@@ -35,6 +35,13 @@ class SummaryRegenerationStatus(StrEnum):
     FAILED = "failed"
 
 
+class TranscriptionLanguage(StrEnum):
+    """User-requested transcription language values mirrored from meetings.language."""
+
+    SERBIAN = "sr"
+    ENGLISH = "en"
+
+
 class ErrorKind(StrEnum):
     """Values mirrored from web/app/db/schema.ts error_kind."""
 
@@ -55,6 +62,14 @@ class TranscriptSegmentDraft:
     end_seconds: float
     speaker_label: str
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionDraft:
+    """Worker-owned transcription payload before DB persistence."""
+
+    segments: tuple[TranscriptSegmentDraft, ...]
+    detected_language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,3 +140,5 @@ class QueuedMeeting:
         SummaryRegenerationStatus.IDLE
     )
     summary_regeneration_processing_started_at: datetime | None = None
+    language: TranscriptionLanguage | None = None
+    detected_language: str | None = None

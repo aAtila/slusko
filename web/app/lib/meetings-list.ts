@@ -6,6 +6,7 @@ import type {
   SummaryOpenQuestion,
   SummaryRegenerationStatus,
 } from "~/db/schema";
+import type { MeetingLanguage } from "./meeting-language";
 
 export type MeetingFailureFields = {
   errorKind: ErrorKind | null;
@@ -20,6 +21,8 @@ export type HomeMeetingListItem = MeetingFailureFields & {
   transcriptionProgress: number | null;
   durationSeconds: number | null;
   createdAt: string;
+  language: MeetingLanguage;
+  detectedLanguage: string | null;
 };
 
 export type MeetingDetail = HomeMeetingListItem & {

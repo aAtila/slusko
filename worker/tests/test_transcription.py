@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from slusko_worker.db.models import MeetingStatus, QueuedMeeting
+from slusko_worker.db.models import MeetingStatus, QueuedMeeting, TranscriptionLanguage
 from slusko_worker.pipeline.errors import TranscriptionEmpty, TranscriptionFailed
 from slusko_worker.pipeline.transcription import WhisperTranscriber
 
@@ -14,7 +14,9 @@ from slusko_worker.pipeline.transcription import WhisperTranscriber
 MEETING_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
-def queued_meeting() -> QueuedMeeting:
+def queued_meeting(
+    language: TranscriptionLanguage | None = None,
+) -> QueuedMeeting:
     return QueuedMeeting(
         id=MEETING_ID,
         status=MeetingStatus.TRANSCRIBING,
@@ -23,6 +25,7 @@ def queued_meeting() -> QueuedMeeting:
         error_kind=None,
         error_message=None,
         failed_at_stage=None,
+        language=language,
     )
 
 
@@ -36,6 +39,7 @@ class FakeSegment:
 @dataclass(frozen=True)
 class FakeInfo:
     duration: float | None
+    language: str | None = None
 
 
 class ExplodingSegments:
@@ -113,6 +117,75 @@ def test_transcriber_loads_whisper_model_once_and_uses_domain_call_options(
         ),
     ]
     assert first == second
+    assert first.detected_language is None
+
+
+def test_transcriber_forwards_requested_language_to_whisper(tmp_path: Path) -> None:
+    model = FakeModel(
+        [FakeSegment(0.0, 4.0, "This is a useful transcript with enough words here")],
+        FakeInfo(duration=10.0),
+    )
+    transcriber = WhisperTranscriber(model_factory=RecordingModelFactory(model))
+    path = normalized_file(tmp_path)
+
+    transcriber.transcribe(
+        meeting=queued_meeting(TranscriptionLanguage.SERBIAN),
+        normalized_path=path,
+        progress=lambda _progress: None,
+    )
+    transcriber.transcribe(
+        meeting=queued_meeting(TranscriptionLanguage.ENGLISH),
+        normalized_path=path,
+        progress=lambda _progress: None,
+    )
+    transcriber.transcribe(
+        meeting=queued_meeting(None),
+        normalized_path=path,
+        progress=lambda _progress: None,
+    )
+
+    assert [call[1]["language"] for call in model.calls] == ["sr", "en", None]
+
+
+def test_transcriber_records_detected_language_only_for_auto(tmp_path: Path) -> None:
+    model = FakeModel(
+        [FakeSegment(0.0, 4.0, "This is a useful transcript with enough words here")],
+        FakeInfo(duration=10.0, language="sr"),
+    )
+    transcriber = WhisperTranscriber(model_factory=RecordingModelFactory(model))
+    path = normalized_file(tmp_path)
+
+    auto_draft = transcriber.transcribe(
+        meeting=queued_meeting(None),
+        normalized_path=path,
+        progress=lambda _progress: None,
+    )
+    forced_draft = transcriber.transcribe(
+        meeting=queued_meeting(TranscriptionLanguage.SERBIAN),
+        normalized_path=path,
+        progress=lambda _progress: None,
+    )
+
+    assert auto_draft.detected_language == "sr"
+    assert forced_draft.detected_language is None
+
+
+def test_transcriber_transliterates_cyrillic_text_before_returning_drafts(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(
+        [FakeSegment(0.0, 4.0, "  Ћао свима, данас причамо о транскрипту  ")],
+        FakeInfo(duration=10.0, language="sr"),
+    )
+    transcriber = WhisperTranscriber(model_factory=RecordingModelFactory(model))
+
+    draft = transcriber.transcribe(
+        meeting=queued_meeting(),
+        normalized_path=normalized_file(tmp_path),
+        progress=lambda _progress: None,
+    )
+
+    assert draft.segments[0].text == "Ćao svima, danas pričamo o transkriptu"
 
 
 def test_transcriber_trims_blank_segments_and_uses_placeholder_speaker_label(
@@ -127,17 +200,17 @@ def test_transcriber_trims_blank_segments_and_uses_placeholder_speaker_label(
     )
     transcriber = WhisperTranscriber(model_factory=RecordingModelFactory(model))
 
-    segments = transcriber.transcribe(
+    draft = transcriber.transcribe(
         meeting=queued_meeting(),
         normalized_path=normalized_file(tmp_path),
         progress=lambda _progress: None,
     )
 
-    assert len(segments) == 1
-    assert segments[0].start_seconds == 1.0
-    assert segments[0].end_seconds == 3.5
-    assert segments[0].speaker_label == "SPEAKER_00"
-    assert segments[0].text == "Hello team, this transcript has enough useful words today"
+    assert len(draft.segments) == 1
+    assert draft.segments[0].start_seconds == 1.0
+    assert draft.segments[0].end_seconds == 3.5
+    assert draft.segments[0].speaker_label == "SPEAKER_00"
+    assert draft.segments[0].text == "Hello team, this transcript has enough useful words today"
 
 
 @pytest.mark.parametrize(

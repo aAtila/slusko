@@ -18,6 +18,7 @@ from slusko_worker.db.models import (
     SummaryDecisionDraft,
     SummaryDraft,
     SummaryOpenQuestionDraft,
+    TranscriptionLanguage,
     TranscriptSegmentDraft,
 )
 from slusko_worker.db.queue import (
@@ -133,6 +134,8 @@ def test_claim_sql_matches_queue_index_predicate_and_uses_skip_locked() -> None:
     assert "for update skip locked" in sql
     assert "order by created_at asc" in sql
     assert "limit 1" in sql
+    assert "language" in sql
+    assert "detected_language" in sql
 
 
 def test_claim_next_executes_claim_inside_explicit_transaction() -> None:
@@ -198,6 +201,28 @@ def test_claim_query_preserves_first_time_pipeline_priority_over_regeneration() 
     assert "summary_regeneration_processing_started_at < now() - interval" in sql
     assert "summary_regeneration_status = case when candidate.claimed_status = 'done' then 'processing'::summary_regeneration_status" in sql
     assert "summary_regeneration_processing_started_at = case when candidate.claimed_status = 'done' then now()" in sql
+
+
+def test_claim_next_parses_requested_and_detected_language_fields() -> None:
+    row = {
+        "id": UUID("00000000-0000-0000-0000-000000000001"),
+        "status": "transcribing",
+        "resume_from_stage": None,
+        "transcription_progress": 50,
+        "error_kind": None,
+        "error_message": None,
+        "failed_at_stage": None,
+        "language": "sr",
+        "detected_language": "sr",
+    }
+    connection = RecordingConnection(row)
+    queue = PostgresMeetingQueue(lambda: connection)
+
+    meeting = queue.claim_next()
+
+    assert meeting is not None
+    assert meeting.language is TranscriptionLanguage.SERBIAN
+    assert meeting.detected_language == "sr"
 
 
 def test_claim_next_returns_regeneration_job_to_processor() -> None:
@@ -308,6 +333,7 @@ def test_mark_transcription_started_enters_stage_with_duration_and_clears_stale_
     assert "status = 'transcribing'" in update_sql
     assert "duration_seconds = coalesce(%(duration_seconds)s, duration_seconds)" in update_sql
     assert "transcription_progress = 0" in update_sql
+    assert "detected_language = null" in update_sql
     assert "error_kind = null" in update_sql
     assert "error_message = null" in update_sql
     assert "failed_at_stage = null" in update_sql
@@ -383,7 +409,9 @@ def test_mark_transcription_succeeded_replaces_segments_and_marks_diarizing() ->
         ),
     ]
 
-    queue.mark_transcription_succeeded(meeting=meeting, segments=segments)
+    queue.mark_transcription_succeeded(
+        meeting=meeting, segments=segments, detected_language="sr"
+    )
 
     statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
     assert statements[0] == (
@@ -402,8 +430,42 @@ def test_mark_transcription_succeeded_replaces_segments_and_marks_diarizing() ->
     update_sql, update_params = statements[-1]
     assert "status = 'diarizing'" in update_sql
     assert "transcription_progress = 100" in update_sql
+    assert "detected_language = %(detected_language)s" in update_sql
     assert "where id = %(meeting_id)s and status = 'transcribing'" in update_sql
-    assert update_params == {"meeting_id": meeting.id}
+    assert update_params == {"meeting_id": meeting.id, "detected_language": "sr"}
+
+
+def test_mark_transcription_succeeded_drops_detected_language_for_forced_language() -> None:
+    connection = RecordingConnection(row=None, rowcounts=[1, 1, 1])
+    queue = PostgresMeetingQueue(lambda: connection)
+    meeting = QueuedMeeting(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        status=MeetingStatus.TRANSCRIBING,
+        resume_from_stage=None,
+        transcription_progress=95,
+        error_kind=None,
+        error_message=None,
+        failed_at_stage=None,
+        language=TranscriptionLanguage.ENGLISH,
+    )
+
+    queue.mark_transcription_succeeded(
+        meeting=meeting,
+        segments=[
+            TranscriptSegmentDraft(
+                start_seconds=0.0,
+                end_seconds=1.0,
+                speaker_label="SPEAKER_00",
+                text="Hello world",
+            )
+        ],
+        detected_language="sr",
+    )
+
+    assert connection.executed_statements[-1][1] == {
+        "meeting_id": meeting.id,
+        "detected_language": None,
+    }
 
 
 def test_load_transcript_segments_returns_ordered_segment_drafts() -> None:
@@ -964,6 +1026,8 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
               error_kind text,
               error_message text,
               failed_at_stage meeting_status,
+              language text,
+              detected_language text,
               created_at timestamptz not null,
               updated_at timestamptz not null default now()
             )
@@ -1273,6 +1337,8 @@ def test_real_postgres_claim_next_does_not_duplicate_pending_claim_before_proces
               error_kind text,
               error_message text,
               failed_at_stage meeting_status,
+              language text,
+              detected_language text,
               created_at timestamptz not null,
               updated_at timestamptz not null default now()
             )
@@ -1358,6 +1424,8 @@ def test_real_postgres_claim_next_promotes_pending_retry_to_resume_stage() -> No
               error_kind text,
               error_message text,
               failed_at_stage meeting_status,
+              language text,
+              detected_language text,
               created_at timestamptz not null,
               updated_at timestamptz not null default now()
             )
@@ -1479,6 +1547,8 @@ def test_real_postgres_skip_locked_claims_distinct_rows_when_database_available(
               error_kind text,
               error_message text,
               failed_at_stage meeting_status,
+              language text,
+              detected_language text,
               created_at timestamptz not null,
               updated_at timestamptz not null default now()
             )

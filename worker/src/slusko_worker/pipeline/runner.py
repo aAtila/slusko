@@ -13,6 +13,7 @@ from slusko_worker.db.models import (
     QueuedMeeting,
     SummaryDraft,
     SummaryRegenerationStatus,
+    TranscriptionDraft,
     TranscriptSegmentDraft,
 )
 from slusko_worker.pipeline.errors import PipelineError
@@ -37,7 +38,11 @@ class PipelineQueue(RecoveryQueue, Protocol):
     ) -> None: ...
 
     def mark_transcription_succeeded(
-        self, *, meeting: QueuedMeeting, segments: Sequence[TranscriptSegmentDraft]
+        self,
+        *,
+        meeting: QueuedMeeting,
+        segments: Sequence[TranscriptSegmentDraft],
+        detected_language: str | None = None,
     ) -> None: ...
 
     def load_transcript_segments(
@@ -88,7 +93,7 @@ class Transcriber(Protocol):
         meeting: QueuedMeeting,
         normalized_path: Path,
         progress: Callable[[int], None],
-    ) -> Sequence[TranscriptSegmentDraft]: ...
+    ) -> TranscriptionDraft: ...
 
 
 class Diarizer(Protocol):
@@ -200,7 +205,7 @@ class PipelineProcessor:
             meeting=meeting, duration_seconds=duration_seconds
         )
         try:
-            segments = self._transcriber.transcribe(
+            draft = self._transcriber.transcribe(
                 meeting=meeting,
                 normalized_path=normalized_path,
                 progress=lambda progress: self._safe_mark_transcription_progress(
@@ -220,7 +225,11 @@ class PipelineProcessor:
             )
             return
 
-        self._queue.mark_transcription_succeeded(meeting=meeting, segments=segments)
+        self._queue.mark_transcription_succeeded(
+            meeting=meeting,
+            segments=draft.segments,
+            detected_language=draft.detected_language,
+        )
         transcript_segments = self._load_transcript_segments_for_stage(
             meeting=meeting, failed_at_stage=MeetingStatus.DIARIZING
         )

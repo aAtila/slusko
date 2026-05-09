@@ -11,6 +11,7 @@ from slusko_worker.db.models import (
     SummaryDecisionDraft,
     SummaryDraft,
     SummaryRegenerationStatus,
+    TranscriptionDraft,
     TranscriptSegmentDraft,
 )
 from slusko_worker.pipeline.errors import (
@@ -78,10 +79,16 @@ class FakeQueue:
             raise self.progress_error
 
     def mark_transcription_succeeded(
-        self, *, meeting: QueuedMeeting, segments: list[TranscriptSegmentDraft]
+        self,
+        *,
+        meeting: QueuedMeeting,
+        segments: list[TranscriptSegmentDraft] | tuple[TranscriptSegmentDraft, ...],
+        detected_language: str | None = None,
     ) -> None:
         self.transcript_segments = list(segments)
-        self.events.append(("transcription_succeeded", meeting.id, segments))
+        self.events.append(
+            ("transcription_succeeded", meeting.id, segments, detected_language)
+        )
 
     def load_transcript_segments(self, meeting: QueuedMeeting) -> list[TranscriptSegmentDraft]:
         self.events.append(("load_transcript_segments", meeting.id))
@@ -156,6 +163,7 @@ class FakeTranscriber:
         segments: list[TranscriptSegmentDraft] | None = None,
         error: Exception | None = None,
         progress_updates: list[int] | None = None,
+        detected_language: str | None = None,
         shared_events: list[object] | None = None,
     ) -> None:
         self.segments = segments or [
@@ -168,6 +176,7 @@ class FakeTranscriber:
         ]
         self.error = error
         self.progress_updates = progress_updates or []
+        self.detected_language = detected_language
         self.events: list[object] = []
         self.shared_events = shared_events
 
@@ -177,7 +186,7 @@ class FakeTranscriber:
         meeting: QueuedMeeting,
         normalized_path: Path,
         progress: object,
-    ) -> list[TranscriptSegmentDraft]:
+    ) -> TranscriptionDraft:
         event = ("transcribe", meeting.id, normalized_path)
         self.events.append(event)
         if self.shared_events is not None:
@@ -186,7 +195,9 @@ class FakeTranscriber:
             progress(update)  # type: ignore[operator]
         if self.error is not None:
             raise self.error
-        return self.segments
+        return TranscriptionDraft(
+            segments=tuple(self.segments), detected_language=self.detected_language
+        )
 
 
 class FakeDiarizer:
@@ -327,7 +338,7 @@ def test_pending_meeting_normalizes_transcribes_diarizes_and_finishes() -> None:
         ("transcription_started", MEETING_ID, 42),
         ("transcribe", MEETING_ID, Path("/tmp/normalized.wav")),
         ("transcription_progress", MEETING_ID, 25),
-        ("transcription_succeeded", MEETING_ID, segments),
+        ("transcription_succeeded", MEETING_ID, tuple(segments), None),
         ("load_transcript_segments", MEETING_ID),
         ("diarization_started", MEETING_ID),
         ("diarize", MEETING_ID, Path("/tmp/normalized.wav"), segments),
@@ -337,6 +348,33 @@ def test_pending_meeting_normalizes_transcribes_diarizes_and_finishes() -> None:
         ("summarization_succeeded", MEETING_ID, summary),
     ]
     assert normalizer.events == [("normalize", MEETING_ID)]
+
+
+def test_transcription_success_persists_detected_language_from_transcriber() -> None:
+    queue = FakeQueue()
+    segments = [
+        TranscriptSegmentDraft(
+            start_seconds=0.0,
+            end_seconds=1.5,
+            speaker_label="SPEAKER_00",
+            text="Hello world",
+        )
+    ]
+    transcriber = FakeTranscriber(
+        segments=segments,
+        detected_language="sr",
+        shared_events=queue.events,
+    )
+    processor = make_processor(queue=queue, transcriber=transcriber)
+
+    processor.process(queued_meeting(MeetingStatus.TRANSCRIBING))
+
+    assert (
+        "transcription_succeeded",
+        MEETING_ID,
+        tuple(segments),
+        "sr",
+    ) in queue.events
 
 
 def test_transcribing_reentry_skips_normalization_and_reuses_normalized_artifact_path() -> None:

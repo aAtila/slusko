@@ -19,6 +19,10 @@ import type {
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import type { MeetingExportFlavor } from "~/lib/meeting-export";
 import {
+  formatMeetingLanguageLabel,
+  languageToFormValue,
+} from "~/lib/meeting-language";
+import {
   applySpeakerMap,
   createSpeakerMap,
   formatDuration,
@@ -111,6 +115,8 @@ export default function MeetingDetailPage({
     navigation.state !== "idle" && submittingIntent === "update-title";
   const isRetrying =
     navigation.state !== "idle" && submittingIntent === "retry-meeting";
+  const isUpdatingLanguage =
+    navigation.state !== "idle" && submittingIntent === "update-language";
   const isRegenerateSubmitting =
     navigation.state !== "idle" && submittingIntent === "regenerate-summary";
 
@@ -321,6 +327,12 @@ export default function MeetingDetailPage({
               {speakerStats.length}{" "}
               {speakerStats.length === 1 ? "speaker" : "speakers"}
             </span>
+            <MetaSeparator />
+            <MeetingLanguageMeta
+              actionData={actionData}
+              isUpdatingLanguage={isUpdatingLanguage}
+              meeting={meeting}
+            />
           </div>
 
           {isEditingTitle ? (
@@ -536,6 +548,97 @@ function TitleFeedback({
     <p className="text-success text-sm font-medium" id={feedbackId}>
       Title saved as “{actionData.title}”.
     </p>
+  );
+}
+
+function MeetingLanguageMeta({
+  actionData,
+  isUpdatingLanguage,
+  meeting,
+}: {
+  actionData: MeetingActionData | undefined;
+  isUpdatingLanguage: boolean;
+  meeting: MeetingDetail;
+}) {
+  const feedback =
+    actionData?.intent === "update-language" ? actionData : undefined;
+  const feedbackId = "meeting-language-feedback";
+
+  if (meeting.status !== "pending") {
+    return (
+      <span aria-label={`Language ${formatMeetingLanguageLabel(meeting)}`}>
+        {formatMeetingLanguageLabel(meeting)}
+      </span>
+    );
+  }
+
+  return (
+    <Form
+      aria-label="Transcription language"
+      className="flex flex-wrap items-center gap-2"
+      method="post"
+      preventScrollReset
+    >
+      <input name="_intent" type="hidden" value="update-language" />
+      <label className="sr-only" htmlFor="meeting-language">
+        Transcription language
+      </label>
+      <span aria-hidden="true">Transcription language</span>
+      <select
+        aria-describedby={feedbackId}
+        className="border-hairline bg-surface-elevated text-ink focus:border-brand rounded-lg border px-2 py-1 text-xs transition outline-none disabled:cursor-wait disabled:opacity-70"
+        defaultValue={languageToFormValue(meeting.language)}
+        disabled={isUpdatingLanguage}
+        id="meeting-language"
+        name="language"
+      >
+        <MeetingLanguageOptions />
+      </select>
+      <button
+        className="border-hairline text-ink-soft hover:bg-surface-sunken inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-medium transition disabled:cursor-wait disabled:opacity-60"
+        disabled={isUpdatingLanguage}
+        type="submit"
+      >
+        {isUpdatingLanguage ? "Saving…" : "Save language"}
+      </button>
+      <LanguageFeedback actionData={feedback} feedbackId={feedbackId} />
+    </Form>
+  );
+}
+
+function LanguageFeedback({
+  actionData,
+  feedbackId,
+}: {
+  actionData: MeetingActionData | undefined;
+  feedbackId: string;
+}) {
+  if (actionData === undefined) {
+    return <span className="sr-only" id={feedbackId} />;
+  }
+
+  if (!actionData.ok) {
+    return (
+      <span className="text-danger text-xs font-medium" id={feedbackId}>
+        {actionData.error}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-success text-xs font-medium" id={feedbackId}>
+      Language saved.
+    </span>
+  );
+}
+
+function MeetingLanguageOptions() {
+  return (
+    <>
+      <option value="sr">Serbian</option>
+      <option value="en">English</option>
+      <option value="auto">Auto-detect</option>
+    </>
   );
 }
 
@@ -1243,13 +1346,30 @@ export function ProcessingPanel({
           );
         })}
       </ol>
-      {failurePresentation?.isRetryable ? (
+      {failurePresentation?.isRetryable && meeting ? (
         <Form
           className="border-hairline mt-5 border-t pt-5"
           method="post"
           preventScrollReset
         >
           <input name="_intent" type="hidden" value="retry-meeting" />
+          <div className="mb-3 space-y-1.5">
+            <label
+              className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase"
+              htmlFor="retry-language"
+            >
+              Retry language
+            </label>
+            <select
+              className="border-hairline bg-surface-elevated text-ink focus:border-brand w-full rounded-lg border px-3 py-2 text-sm transition outline-none disabled:cursor-wait disabled:opacity-70"
+              defaultValue={languageToFormValue(meeting.language)}
+              disabled={isRetrying}
+              id="retry-language"
+              name="language"
+            >
+              <MeetingLanguageOptions />
+            </select>
+          </div>
           <button
             className="border-warning/30 bg-warning-soft/60 hover:bg-warning-soft hover:border-warning/50 focus-visible:outline-warning inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium text-[#7a5a16] transition hover:text-[#5e4410] focus-visible:outline-2 focus-visible:outline-offset-2 active:translate-y-px disabled:cursor-wait disabled:opacity-60"
             disabled={isRetrying}

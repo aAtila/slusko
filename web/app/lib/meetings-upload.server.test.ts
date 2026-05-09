@@ -14,11 +14,18 @@ async function tempMeetingsRoot() {
   return mkdtemp(path.join(os.tmpdir(), "slusko-meetings-upload-"));
 }
 
-function uploadRequest(file: File, extraFields?: Record<string, string>) {
+function uploadRequest(
+  file: File,
+  extraFields?: Record<string, string> | [string, string][],
+) {
   const body = new FormData();
   body.append("recording", file);
 
-  for (const [name, value] of Object.entries(extraFields ?? {})) {
+  const fields = Array.isArray(extraFields)
+    ? extraFields
+    : Object.entries(extraFields ?? {});
+
+  for (const [name, value] of fields) {
     body.append(name, value);
   }
 
@@ -57,6 +64,7 @@ describe("meeting upload", () => {
       sourceFilename: "Weekly Sync.mp3",
       title: "Weekly Sync",
       uploadedBy: "test-user",
+      language: "sr",
     });
     expect(enqueued).toEqual([meeting]);
   });
@@ -102,7 +110,92 @@ describe("meeting upload", () => {
       ),
     );
 
-    expect(error.message).toContain("without extra form fields");
+    expect(error.message).toContain("only the optional language field");
+    await expect(readdir(meetingsStorageRoot)).resolves.toEqual([]);
+  });
+
+  test("accepts English as the requested meeting language", async () => {
+    const meetingsStorageRoot = await tempMeetingsRoot();
+
+    const meeting = await createPendingMeetingFromUpload(
+      uploadRequest(new File(["audio bytes"], "client-call.mp3"), {
+        language: "en",
+      }),
+      {
+        enqueuePendingMeeting: async () => {},
+        generateMeetingId: () => meetingId,
+        meetingsStorageRoot,
+      },
+    );
+
+    expect(meeting.language).toBe("en");
+  });
+
+  test("normalizes Auto-detect uploads to a null requested language", async () => {
+    const meetingsStorageRoot = await tempMeetingsRoot();
+
+    const meeting = await createPendingMeetingFromUpload(
+      uploadRequest(new File(["audio bytes"], "mixed-language.wav"), {
+        language: "auto",
+      }),
+      {
+        enqueuePendingMeeting: async () => {},
+        generateMeetingId: () => meetingId,
+        meetingsStorageRoot,
+      },
+    );
+
+    expect(meeting.language).toBeNull();
+  });
+
+  test("rejects invalid meeting language values", async () => {
+    for (const language of ["de", ""] as const) {
+      const meetingsStorageRoot = await tempMeetingsRoot();
+
+      const error = await captureMeetingUploadError(
+        createPendingMeetingFromUpload(
+          uploadRequest(new File(["audio bytes"], "recording.mp3"), {
+            language,
+          }),
+          {
+            enqueuePendingMeeting: async () => {
+              throw new Error(
+                "invalid language uploads must not enqueue meetings",
+              );
+            },
+            generateMeetingId: () => meetingId,
+            meetingsStorageRoot,
+          },
+        ),
+      );
+
+      expect(error.message).toBe("Choose Serbian, English, or Auto-detect.");
+      await expect(readdir(meetingsStorageRoot)).resolves.toEqual([]);
+    }
+  });
+
+  test("rejects duplicate meeting language fields", async () => {
+    const meetingsStorageRoot = await tempMeetingsRoot();
+
+    const error = await captureMeetingUploadError(
+      createPendingMeetingFromUpload(
+        uploadRequest(new File(["audio bytes"], "recording.mp3"), [
+          ["language", "sr"],
+          ["language", "en"],
+        ]),
+        {
+          enqueuePendingMeeting: async () => {
+            throw new Error(
+              "duplicate language uploads must not enqueue meetings",
+            );
+          },
+          generateMeetingId: () => meetingId,
+          meetingsStorageRoot,
+        },
+      ),
+    );
+
+    expect(error.message).toBe("Choose one meeting language.");
     await expect(readdir(meetingsStorageRoot)).resolves.toEqual([]);
   });
 

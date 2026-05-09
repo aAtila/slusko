@@ -47,6 +47,8 @@ export const meetings = pgTable(
     title: text("title").notNull(),
     sourceFilenames: text("source_filenames").array().notNull(),
     uploadedBy: text("uploaded_by").notNull(),
+    language: text("language").$type<RequestedMeetingLanguage>(),
+    detectedLanguage: text("detected_language"),
     status: meetingStatus("status").notNull().default("pending"),
     summaryRegenerationStatus: summaryRegenerationStatus(
       "summary_regeneration_status",
@@ -82,6 +84,18 @@ export const meetings = pgTable(
     check(
       "meetings_source_filenames_non_empty_check",
       sql`array_length(${table.sourceFilenames}, 1) >= 1`,
+    ),
+    check(
+      "meetings_language_valid_check",
+      sql`${table.language} is null or ${table.language} in ('sr', 'en')`,
+    ),
+    check(
+      "meetings_detected_language_auto_only_check",
+      sql`${table.detectedLanguage} is null or ${table.language} is null`,
+    ),
+    check(
+      "meetings_detected_language_non_empty_check",
+      sql`${table.detectedLanguage} is null or length(trim(${table.detectedLanguage})) > 0`,
     ),
     index("meetings_created_at_idx").on(table.createdAt.desc()),
     index("meetings_queue_claim_idx")
@@ -181,6 +195,8 @@ export const speakerMappings = pgTable(
   ],
 );
 
+export type RequestedMeetingLanguage = "sr" | "en";
+export type MeetingLanguage = RequestedMeetingLanguage | null;
 export type MeetingStatus = (typeof meetingStatus.enumValues)[number];
 export type SummaryRegenerationStatus =
   (typeof summaryRegenerationStatus.enumValues)[number];

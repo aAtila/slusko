@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import {
+  formatMeetingLanguageLabel,
+  formatRequestedLanguageLabel,
+} from "./meeting-language";
 import type { HomeMeetingListItem } from "./meetings-list";
 import {
   applySpeakerMap,
@@ -21,6 +25,8 @@ function meeting(overrides: Partial<HomeMeetingListItem>): HomeMeetingListItem {
     errorMessage: null,
     failedAtStage: null,
     createdAt: "2026-05-05T10:00:00.000Z",
+    language: "sr",
+    detectedLanguage: null,
     ...overrides,
   };
 }
@@ -211,6 +217,36 @@ describe("meeting failure presentation helpers", () => {
         }),
       ),
     ).toMatchObject({ isRetryable: false, retryLabel: null });
+  });
+});
+
+describe("meeting language presentation helpers", () => {
+  test("formats requested language choices", () => {
+    expect(formatRequestedLanguageLabel("sr")).toBe("Serbian");
+    expect(formatRequestedLanguageLabel("en")).toBe("English");
+    expect(formatRequestedLanguageLabel(null)).toBe("Auto-detect");
+  });
+
+  test("formats resolved language labels for meeting lists and details", () => {
+    expect(formatMeetingLanguageLabel(meeting({ language: "sr" }))).toBe(
+      "Serbian",
+    );
+    expect(formatMeetingLanguageLabel(meeting({ language: "en" }))).toBe(
+      "English",
+    );
+    expect(formatMeetingLanguageLabel(meeting({ language: null }))).toBe(
+      "Auto-detect pending",
+    );
+    expect(
+      formatMeetingLanguageLabel(
+        meeting({ language: null, detectedLanguage: "hr" }),
+      ),
+    ).toBe("Auto-detected Croatian");
+    expect(
+      formatMeetingLanguageLabel(
+        meeting({ language: null, detectedLanguage: "de" }),
+      ),
+    ).toBe("Auto-detected DE");
   });
 });
 

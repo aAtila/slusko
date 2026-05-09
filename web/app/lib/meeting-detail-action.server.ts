@@ -4,11 +4,13 @@ import {
   regenerateSummary,
   retryMeeting,
   saveSpeakerMapping,
+  updateMeetingLanguage,
   updateMeetingTitle,
   type DeleteMeetingResult,
   type RegenerateSummaryResult,
   type RetryMeetingResult,
   type SaveSpeakerMappingResult,
+  type UpdateMeetingLanguageResult,
   type UpdateMeetingTitleResult,
 } from "./meetings-mutations.server";
 
@@ -17,10 +19,16 @@ type MeetingDetailActionIntent =
   | "regenerate-summary"
   | "retry-meeting"
   | "save-speaker-mapping"
+  | "update-language"
   | "update-title";
 
 export type MeetingDetailActionData =
   | { ok: true; intent: "update-title"; title: string }
+  | {
+      ok: true;
+      intent: "update-language";
+      language: UpdateMeetingLanguageResult["language"];
+    }
   | { ok: true; intent: "regenerate-summary" }
   | {
       ok: true;
@@ -59,7 +67,12 @@ type MeetingDetailActionHandlers = {
   }) => Promise<SaveSpeakerMappingResult>;
   retryMeeting?: (input: {
     meetingId: string | undefined;
+    language: unknown;
   }) => Promise<RetryMeetingResult>;
+  updateMeetingLanguage?: (input: {
+    meetingId: string | undefined;
+    language: unknown;
+  }) => Promise<UpdateMeetingLanguageResult>;
   regenerateSummary?: (input: {
     meetingId: string | undefined;
   }) => Promise<RegenerateSummaryResult>;
@@ -113,6 +126,9 @@ export async function handleMeetingDetailAction(
     if (intent === "retry-meeting") {
       const result = await (handlers.retryMeeting ?? retryMeeting)({
         meetingId: input.meetingId,
+        language: input.formData.has("language")
+          ? input.formData.get("language")
+          : undefined,
       });
 
       return {
@@ -121,6 +137,24 @@ export async function handleMeetingDetailAction(
           ok: true,
           intent: "retry-meeting",
           resumeFromStage: result.resumeFromStage,
+        },
+      };
+    }
+
+    if (intent === "update-language") {
+      const result = await (
+        handlers.updateMeetingLanguage ?? updateMeetingLanguage
+      )({
+        meetingId: input.meetingId,
+        language: input.formData.get("language"),
+      });
+
+      return {
+        type: "data",
+        data: {
+          ok: true,
+          intent: "update-language",
+          language: result.language,
         },
       };
     }
@@ -218,6 +252,18 @@ export async function handleMeetingDetailAction(
       };
     }
 
+    if (intent === "update-language") {
+      return {
+        type: "data",
+        data: {
+          ok: false,
+          intent: "update-language",
+          error: "Could not update language. Please try again.",
+        },
+        status: 500,
+      };
+    }
+
     throw error;
   }
 }
@@ -230,6 +276,7 @@ function isMeetingDetailActionIntent(
     intent === "regenerate-summary" ||
     intent === "retry-meeting" ||
     intent === "save-speaker-mapping" ||
+    intent === "update-language" ||
     intent === "update-title"
   );
 }

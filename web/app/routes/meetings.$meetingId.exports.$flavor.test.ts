@@ -12,6 +12,8 @@ function buildRouteData(): MeetingDetailRouteData {
       status: "done",
       transcriptionProgress: null,
       durationSeconds: 75,
+      language: "sr",
+      detectedLanguage: null,
       errorKind: null,
       errorMessage: null,
       failedAtStage: null,

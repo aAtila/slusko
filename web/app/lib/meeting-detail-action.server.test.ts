@@ -86,9 +86,13 @@ describe("meeting detail route action", () => {
 
   test("queues a retry through the retry mutation", async () => {
     const formData = new FormData();
-    const calls: Array<{ meetingId: string | undefined }> = [];
+    const calls: Array<{
+      meetingId: string | undefined;
+      language: unknown;
+    }> = [];
 
     formData.set("_intent", "retry-meeting");
+    formData.set("language", "en");
 
     const result = await handleMeetingDetailAction(
       { formData, meetingId },
@@ -108,7 +112,37 @@ describe("meeting detail route action", () => {
         resumeFromStage: "diarizing",
       },
     } satisfies MeetingDetailActionResult);
-    expect(calls).toEqual([{ meetingId }]);
+    expect(calls).toEqual([{ meetingId, language: "en" }]);
+  });
+
+  test("passes undefined for absent retry language but preserves an explicit empty value", async () => {
+    const absentLanguageFormData = new FormData();
+    const emptyLanguageFormData = new FormData();
+    const calls: Array<{
+      meetingId: string | undefined;
+      language: unknown;
+    }> = [];
+
+    absentLanguageFormData.set("_intent", "retry-meeting");
+    emptyLanguageFormData.set("_intent", "retry-meeting");
+    emptyLanguageFormData.set("language", "");
+
+    for (const formData of [absentLanguageFormData, emptyLanguageFormData]) {
+      await handleMeetingDetailAction(
+        { formData, meetingId },
+        {
+          retryMeeting: async (input) => {
+            calls.push(input);
+            return { id: input.meetingId ?? "", resumeFromStage: "diarizing" };
+          },
+        },
+      );
+    }
+
+    expect(calls).toEqual([
+      { meetingId, language: undefined },
+      { meetingId, language: "" },
+    ]);
   });
 
   test("returns retry validation feedback", async () => {
@@ -227,6 +261,60 @@ describe("meeting detail route action", () => {
         intent: "save-speaker-mapping",
         speakerLabel: "speaker-00",
         error: "Choose a valid speaker label.",
+      },
+      status: 400,
+    } satisfies MeetingDetailActionResult);
+  });
+
+  test("updates language through the language mutation", async () => {
+    const formData = new FormData();
+    const calls: Array<{ meetingId: string | undefined; language: unknown }> =
+      [];
+
+    formData.set("_intent", "update-language");
+    formData.set("language", "auto");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        updateMeetingLanguage: async (input) => {
+          calls.push(input);
+          return { id: input.meetingId ?? "", language: null };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: { ok: true, intent: "update-language", language: null },
+    } satisfies MeetingDetailActionResult);
+    expect(calls).toEqual([{ meetingId, language: "auto" }]);
+  });
+
+  test("returns language update validation feedback", async () => {
+    const formData = new FormData();
+
+    formData.set("_intent", "update-language");
+    formData.set("language", "de");
+
+    const result = await handleMeetingDetailAction(
+      { formData, meetingId },
+      {
+        updateMeetingLanguage: async () => {
+          throw new MeetingMutationError(
+            "Choose Serbian, English, or Auto-detect.",
+            400,
+          );
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      type: "data",
+      data: {
+        ok: false,
+        intent: "update-language",
+        error: "Choose Serbian, English, or Auto-detect.",
       },
       status: 400,
     } satisfies MeetingDetailActionResult);

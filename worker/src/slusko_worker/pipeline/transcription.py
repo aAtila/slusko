@@ -8,8 +8,9 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
-from slusko_worker.db.models import QueuedMeeting, TranscriptSegmentDraft
+from slusko_worker.db.models import QueuedMeeting, TranscriptionDraft, TranscriptSegmentDraft
 from slusko_worker.pipeline.errors import TranscriptionEmpty, TranscriptionFailed
+from slusko_worker.pipeline.transliteration import to_latin_script
 
 PLACEHOLDER_SPEAKER_LABEL = "SPEAKER_00"
 DEFAULT_WHISPER_MODEL = "large-v3"
@@ -30,6 +31,7 @@ class WhisperSegment(Protocol):
 
 class WhisperInfo(Protocol):
     duration: float | None
+    language: str | None
 
 
 class WhisperModelLike(Protocol):
@@ -72,7 +74,7 @@ class WhisperTranscriber:
         meeting: QueuedMeeting,
         normalized_path: Path,
         progress: ProgressCallback,
-    ) -> list[TranscriptSegmentDraft]:
+    ) -> TranscriptionDraft:
         if not normalized_path.is_file():
             raise TranscriptionFailed(
                 f"normalized audio is missing for meeting {meeting.id}: {normalized_path}"
@@ -82,7 +84,7 @@ class WhisperTranscriber:
         try:
             raw_segments, info = model.transcribe(
                 str(normalized_path),
-                language=None,
+                language=meeting.language.value if meeting.language is not None else None,
                 condition_on_previous_text=False,
             )
         except Exception as error:
@@ -110,7 +112,7 @@ class WhisperTranscriber:
                             last_progress = candidate_progress
                             last_emit_at = now
 
-                text = raw_segment.text.strip()
+                text = to_latin_script(raw_segment.text.strip())
                 if not text:
                     continue
                 drafts.append(
@@ -127,7 +129,10 @@ class WhisperTranscriber:
         if _is_empty_transcript(drafts):
             raise TranscriptionEmpty()
 
-        return drafts
+        return TranscriptionDraft(
+            segments=tuple(drafts),
+            detected_language=_detected_language_for_meeting(meeting, info),
+        )
 
     def preload_model(self) -> None:
         self._load_model()
@@ -174,6 +179,18 @@ def _progress_from_segment_end(segment_end: float, duration: float) -> int:
     except (OverflowError, ValueError):
         return 0
     return max(0, min(99, progress))
+
+
+def _detected_language_for_meeting(
+    meeting: QueuedMeeting, info: WhisperInfo
+) -> str | None:
+    if meeting.language is not None:
+        return None
+    language = getattr(info, "language", None)
+    if language is None:
+        return None
+    value = str(language).strip()
+    return value or None
 
 
 def _is_empty_transcript(segments: list[TranscriptSegmentDraft]) -> bool:

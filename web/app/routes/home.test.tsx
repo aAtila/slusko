@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { HomeMeetingListItem } from "~/lib/meetings-list";
-import { MeetingCard, MeetingRow } from "./home";
+import { MeetingCard, MeetingRow, UploadDialog, UploadPanel } from "./home";
 
 function meeting(
   overrides: Partial<HomeMeetingListItem> = {},
@@ -18,6 +18,8 @@ function meeting(
     errorMessage: "speaker clustering failed",
     failedAtStage: "diarizing",
     createdAt: "2026-05-05T10:00:00.000Z",
+    language: "sr",
+    detectedLanguage: null,
     ...overrides,
   };
 }
@@ -25,6 +27,67 @@ function meeting(
 function renderWithRouter(children: ReactNode) {
   return renderToStaticMarkup(<MemoryRouter>{children}</MemoryRouter>);
 }
+
+describe("home upload language picker", () => {
+  test("drop target explains drag-and-drop uses the Serbian default", () => {
+    const markup = renderToStaticMarkup(
+      <UploadPanel
+        isDraggingRecording={false}
+        isUploading={false}
+        onBrowseFiles={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Dropped files use Serbian by default");
+    expect(markup).toContain("browse to choose English or Auto-detect");
+  });
+
+  test("upload dialog includes a Serbian-default language field", () => {
+    const markup = renderToStaticMarkup(
+      <UploadDialog
+        isUploading={false}
+        selectedFileName={null}
+        onCancel={() => {}}
+        onFileChange={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Transcription language");
+    expect(markup).toContain('name="language"');
+    expect(markup).toContain('value="sr" selected=""');
+    expect(markup).toContain("Serbian");
+    expect(markup).toContain("English");
+    expect(markup).toContain("Auto-detect");
+  });
+});
+
+describe("home meeting language presentation", () => {
+  test("desktop rows show duration with requested language", () => {
+    const markup = renderWithRouter(
+      <MeetingRow index={0} meeting={meeting({ status: "done" })} />,
+    );
+
+    expect(markup).toContain("20m 00s");
+    expect(markup).toContain("Serbian");
+  });
+
+  test("mobile cards show pending auto-detect labels", () => {
+    const markup = renderWithRouter(
+      <MeetingCard
+        index={0}
+        meeting={meeting({
+          durationSeconds: null,
+          language: null,
+          detectedLanguage: "hr",
+        })}
+      />,
+    );
+
+    expect(markup).toContain("Pending");
+    expect(markup).toContain("Auto-detected Croatian");
+  });
+});
 
 describe("home meeting failure presentation", () => {
   test("desktop rows show error-kind-specific failure copy", () => {

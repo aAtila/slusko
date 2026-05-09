@@ -163,6 +163,8 @@ function meeting(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
     status: "error",
     transcriptionProgress: null,
     durationSeconds: 300,
+    language: "sr",
+    detectedLanguage: null,
     errorKind: "diarization_failed",
     errorMessage: "speaker clustering failed",
     failedAtStage: "diarizing",
@@ -275,6 +277,32 @@ describe("ErrorBlock", () => {
   });
 });
 
+describe("meeting detail language controls", () => {
+  test("shows the resolved language label in the detail header", () => {
+    const markup = renderMeetingDetailPage({
+      meetingOverrides: { language: null, detectedLanguage: "sr" },
+    });
+
+    expect(markup).toContain("Auto-detected Serbian");
+  });
+
+  test("renders inline language editor only while pending", () => {
+    const pendingMarkup = renderMeetingDetailPage({
+      meetingOverrides: { status: "pending", language: "sr" },
+    });
+    const doneMarkup = renderMeetingDetailPage({
+      meetingOverrides: { status: "done", language: "sr" },
+    });
+
+    expect(pendingMarkup).toContain('value="update-language"');
+    expect(pendingMarkup).toContain('name="language"');
+    expect(pendingMarkup).toContain("Transcription language");
+    expect(pendingMarkup).toContain("Save language");
+    expect(doneMarkup).not.toContain('value="update-language"');
+    expect(doneMarkup).toContain("Serbian");
+  });
+});
+
 describe("ProcessingPanel retry affordance", () => {
   test("renders inline retry beside the failed stage for retryable failures", () => {
     const failureMeeting = meeting();
@@ -288,6 +316,23 @@ describe("ProcessingPanel retry affordance", () => {
     expect(markup).toContain('value="retry-meeting"');
     expect(markup).toContain("Retry from speaker identification");
     expect(markup).toContain("Halted");
+  });
+
+  test("renders a retry language picker defaulting to the failed meeting language", () => {
+    const failureMeeting = meeting({ language: null, detectedLanguage: "sr" });
+    const markup = renderProcessingPanel({
+      failedAtStage: failureMeeting.failedAtStage,
+      meetingForFailure: failureMeeting,
+      progress: failureMeeting.transcriptionProgress,
+      status: failureMeeting.status,
+    });
+
+    expect(markup).toContain("Retry language");
+    expect(markup).toContain('name="language"');
+    expect(markup).toContain('value="sr"');
+    expect(markup).toContain('value="en"');
+    expect(markup).toContain('value="auto"');
+    expect(markup).toContain("Auto-detect");
   });
 
   test("shows queueing label while a retry is submitting", () => {

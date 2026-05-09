@@ -12,6 +12,7 @@ import {
   type SummaryRegenerationStatus,
 } from "~/db/schema";
 import { isMeetingId } from "./meeting-id";
+import type { MeetingLanguage } from "./meeting-language";
 import type {
   HomeMeetingListItem,
   MeetingDetail,
@@ -27,6 +28,8 @@ export type HomeMeetingListRow = {
   status: MeetingStatus;
   transcriptionProgress: number | null;
   durationSeconds: number | null;
+  language: MeetingLanguage;
+  detectedLanguage: string | null;
   errorKind: ErrorKind | null;
   errorMessage: string | null;
   failedAtStage: MeetingStatus | null;
@@ -71,6 +74,8 @@ export async function loadHomeMeetings(): Promise<HomeMeetingListItem[]> {
       status: meetings.status,
       transcriptionProgress: meetings.transcriptionProgress,
       durationSeconds: meetings.durationSeconds,
+      language: meetings.language,
+      detectedLanguage: meetings.detectedLanguage,
       errorKind: meetings.errorKind,
       errorMessage: meetings.errorMessage,
       failedAtStage: meetings.failedAtStage,
@@ -139,6 +144,8 @@ async function findMeetingDetailRow(
       status: meetings.status,
       transcriptionProgress: meetings.transcriptionProgress,
       durationSeconds: meetings.durationSeconds,
+      language: meetings.language,
+      detectedLanguage: meetings.detectedLanguage,
       errorKind: meetings.errorKind,
       errorMessage: meetings.errorMessage,
       failedAtStage: meetings.failedAtStage,
