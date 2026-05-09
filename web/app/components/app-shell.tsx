@@ -39,9 +39,25 @@ export type AppShellDropZone = {
   onDrop: DragEventHandler<HTMLElement>;
 };
 
+export type AppShellSectionNavItem = {
+  defaultActive?: boolean;
+  icon: IconName;
+  label: string;
+  to: string;
+};
+
+export type AppShellSidebar =
+  | { kind?: "default" }
+  | {
+      ariaLabel: string;
+      items: AppShellSectionNavItem[];
+      kind: "sections";
+    };
+
 export type AppShellChrome = {
   dropZone?: AppShellDropZone;
   primaryAction?: AppShellPrimaryAction;
+  sidebar?: AppShellSidebar;
   storage?: AppShellStorageSummary;
 };
 
@@ -61,6 +77,20 @@ const defaultStorage: AppShellStorageSummary = {
   percentageLabel: "28%",
 };
 
+const defaultSidebar: AppShellSidebar = { kind: "default" };
+
+const meetingDetailSidebar: AppShellSidebar = {
+  kind: "sections",
+  ariaLabel: "Meeting sections",
+  items: [
+    { defaultActive: true, icon: "sliders", label: "Summary", to: "#overview" },
+    { icon: "file", label: "Transcript", to: "#transcript" },
+    { icon: "refresh", label: "Processing", to: "#processing" },
+    { icon: "users", label: "Speakers", to: "#speakers" },
+    { icon: "megaphone", label: "Key moments", to: "#key-moments" },
+  ],
+};
+
 const AppShellChromeContext = createContext<AppShellChromeContextValue | null>(
   null,
 );
@@ -78,6 +108,7 @@ const navItems: Array<
 ];
 
 export function AppShell() {
+  const location = useLocation();
   const [chromeOverride, setChromeOverride] = useState<AppShellChrome | null>(
     null,
   );
@@ -87,7 +118,13 @@ export function AppShell() {
   );
   const dropZone = chromeOverride?.dropZone;
   const primaryAction = chromeOverride?.primaryAction ?? defaultPrimaryAction;
+  const routeSidebar = location.pathname.startsWith("/meetings/")
+    ? meetingDetailSidebar
+    : defaultSidebar;
+  const sidebar = chromeOverride?.sidebar ?? routeSidebar;
   const storage = chromeOverride?.storage ?? defaultStorage;
+  const desktopInsetClass =
+    sidebar.kind === "sections" ? "lg:pl-[164px]" : "lg:pl-[258px]";
 
   return (
     <AppShellChromeContext.Provider value={contextValue}>
@@ -98,8 +135,12 @@ export function AppShell() {
         onDragOver={dropZone?.onDragOver}
         onDrop={dropZone?.onDrop}
       >
-        <DesktopSidebar primaryAction={primaryAction} storage={storage} />
-        <div className="flex min-w-0 flex-col lg:pl-[258px]">
+        <DesktopSidebar
+          primaryAction={primaryAction}
+          sidebar={sidebar}
+          storage={storage}
+        />
+        <div className={`flex min-w-0 flex-col ${desktopInsetClass}`}>
           <MobileHeader primaryAction={primaryAction} />
           <Outlet />
         </div>
@@ -122,13 +163,19 @@ export function useAppShellChrome(chrome: AppShellChrome) {
   }, [chrome, context]);
 }
 
-function DesktopSidebar({
+export function DesktopSidebar({
   primaryAction,
+  sidebar = defaultSidebar,
   storage,
 }: {
   primaryAction: AppShellPrimaryAction;
+  sidebar?: AppShellSidebar;
   storage: AppShellStorageSummary;
 }) {
+  if (sidebar.kind === "sections") {
+    return <SectionSidebar sidebar={sidebar} />;
+  }
+
   return (
     <aside className="border-hairline bg-canvas hidden w-[258px] border-r px-6 py-8 lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
       <Link
@@ -146,6 +193,53 @@ function DesktopSidebar({
         <StorageCard storage={storage} />
         <UserCard />
       </div>
+    </aside>
+  );
+}
+
+function SectionSidebar({
+  sidebar,
+}: {
+  sidebar: Extract<AppShellSidebar, { kind: "sections" }>;
+}) {
+  const location = useLocation();
+
+  return (
+    <aside className="border-hairline bg-surface hidden w-[164px] border-r lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
+      <Link
+        aria-label="Sluško home"
+        className="border-hairline flex h-24 items-center justify-center border-b"
+        to="/"
+      >
+        <LogoMark />
+      </Link>
+      <nav
+        aria-label={sidebar.ariaLabel}
+        className="flex flex-1 flex-col gap-1 px-3 py-5 text-center text-xs font-medium"
+      >
+        {sidebar.items.map((item) => {
+          const itemHash = item.to.startsWith("#") ? item.to : "";
+          const isActive = location.hash
+            ? itemHash === location.hash
+            : item.defaultActive === true;
+
+          return (
+            <Link
+              aria-current={isActive ? "location" : undefined}
+              className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl px-2 py-3 transition ${
+                isActive
+                  ? "bg-brand-soft text-brand"
+                  : "text-ink-muted hover:bg-surface-sunken/70 hover:text-ink-soft"
+              }`}
+              key={item.label}
+              to={item.to}
+            >
+              <Icon className="size-5" name={item.icon} />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
     </aside>
   );
 }

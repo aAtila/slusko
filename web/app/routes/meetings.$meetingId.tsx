@@ -1175,7 +1175,7 @@ export function ProcessingPanel({
   };
 
   return (
-    <aside className={railCardClass}>
+    <aside className={railCardClass} id="processing">
       <header className="flex items-center justify-between gap-3">
         <h2 className="font-display text-ink text-lg font-medium tracking-tight">
           Processing
@@ -1284,7 +1284,7 @@ export function SpeakersPanel({
   speakers: SpeakerStat[];
 }) {
   return (
-    <aside className={railCardClass}>
+    <aside className={railCardClass} id="speakers">
       <header className="flex items-center justify-between gap-3">
         <div>
           <h2 className="font-display text-ink text-lg font-medium tracking-tight">
@@ -1441,7 +1441,7 @@ function SpeakerMappingRow({
 function HighlightsPanel({ topics }: { topics: TopicItem[] }) {
   if (topics.length === 0) {
     return (
-      <aside className={railCardClass}>
+      <aside className={railCardClass} id="key-moments">
         <header className="flex items-center justify-between gap-3">
           <h2 className="font-display text-ink text-lg font-medium tracking-tight">
             Key moments
@@ -1457,7 +1457,7 @@ function HighlightsPanel({ topics }: { topics: TopicItem[] }) {
   const dotColors = ["bg-brand", "bg-accent", "bg-warning", "bg-success"];
 
   return (
-    <aside className={railCardClass}>
+    <aside className={railCardClass} id="key-moments">
       <header className="flex items-center justify-between gap-3">
         <h2 className="font-display text-ink text-lg font-medium tracking-tight">
           Key moments
