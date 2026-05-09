@@ -374,11 +374,7 @@ export default function MeetingDetailPage({
               status={meeting.status}
             />
             {meeting.status === "error" ? (
-              <ErrorBlock
-                actionData={actionData}
-                isRetrying={isRetrying}
-                meeting={meeting}
-              />
+              <ErrorBlock meeting={meeting} />
             ) : null}
             <DangerZone
               actionData={actionData}
@@ -389,7 +385,10 @@ export default function MeetingDetailPage({
 
           <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
             <ProcessingPanel
+              actionData={actionData}
               failedAtStage={meeting.failedAtStage}
+              isRetrying={isRetrying}
+              meeting={meeting}
               progress={meeting.transcriptionProgress}
               status={meeting.status}
             />
@@ -1133,11 +1132,17 @@ const PIPELINE_STAGES: Array<{
 type StageState = "complete" | "active" | "pending" | "failed";
 
 export function ProcessingPanel({
+  actionData,
   failedAtStage,
+  isRetrying = false,
+  meeting,
   progress,
   status,
 }: {
+  actionData?: MeetingActionData;
   failedAtStage: MeetingStatus | null;
+  isRetrying?: boolean;
+  meeting?: MeetingDetail;
   progress: number | null;
   status: MeetingStatus;
 }) {
@@ -1174,6 +1179,14 @@ export function ProcessingPanel({
     return "pending";
   };
 
+  const failurePresentation = meeting
+    ? getMeetingFailurePresentation(meeting)
+    : null;
+  const retryError =
+    actionData?.ok === false && actionData.intent === "retry-meeting"
+      ? actionData.error
+      : null;
+
   return (
     <aside className={railCardClass} id="processing">
       <header className="flex items-center justify-between gap-3">
@@ -1187,6 +1200,10 @@ export function ProcessingPanel({
         ) : status === "pending" ? (
           <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase">
             Queued
+          </span>
+        ) : status === "error" ? (
+          <span className="text-danger font-mono text-[11px] tracking-[0.06em] uppercase">
+            Halted
           </span>
         ) : null}
       </header>
@@ -1224,6 +1241,30 @@ export function ProcessingPanel({
           );
         })}
       </ol>
+      {failurePresentation?.isRetryable ? (
+        <Form
+          className="border-hairline mt-5 border-t pt-5"
+          method="post"
+          preventScrollReset
+        >
+          <input name="_intent" type="hidden" value="retry-meeting" />
+          <button
+            className="border-warning/30 bg-warning-soft/60 hover:bg-warning-soft hover:border-warning/50 focus-visible:outline-warning inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium text-[#7a5a16] transition hover:text-[#5e4410] focus-visible:outline-2 focus-visible:outline-offset-2 active:translate-y-px disabled:cursor-wait disabled:opacity-60"
+            disabled={isRetrying}
+            type="submit"
+          >
+            <Icon className="size-4" name="refresh" />
+            {isRetrying
+              ? "Queueing retry…"
+              : (failurePresentation.retryLabel ?? "Retry")}
+          </button>
+          {retryError ? (
+            <p className="text-danger mt-3 text-xs leading-snug">
+              {retryError}
+            </p>
+          ) : null}
+        </Form>
+      ) : null}
     </aside>
   );
 }
@@ -1554,72 +1595,62 @@ function DangerZone({
   );
 }
 
-export function ErrorBlock({
-  actionData,
-  isRetrying = false,
-  meeting,
-}: {
-  actionData?: MeetingActionData;
-  isRetrying?: boolean;
-  meeting: MeetingDetail;
-}) {
+export function ErrorBlock({ meeting }: { meeting: MeetingDetail }) {
   const presentation = getMeetingFailurePresentation(meeting);
-  const retryError =
-    actionData?.ok === false && actionData.intent === "retry-meeting"
-      ? actionData.error
-      : null;
+  const title = presentation?.title ?? "Processing failed";
 
   return (
-    <div className="border-danger/25 bg-danger-soft/40 rounded-2xl border p-6 sm:p-8">
-      <div className="flex items-start gap-3">
-        <span className="bg-danger text-canvas mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full">
-          <Icon className="size-4" name="alert" />
+    <details
+      className="group border-danger/25 bg-surface [&[open]]:bg-surface-elevated rounded-xl border"
+      data-testid="meeting-failure-disclosure"
+    >
+      <summary className="hover:bg-danger-soft/30 flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 transition select-none [&::-webkit-details-marker]:hidden">
+        <span className="bg-danger-soft text-danger inline-flex size-6 shrink-0 items-center justify-center rounded-full">
+          <Icon className="size-3.5" name="alert" />
         </span>
-        <div>
-          <h2 className="font-display text-danger text-xl font-medium tracking-tight">
-            {presentation?.title ?? "Processing failed"}
-          </h2>
-          <p className="text-ink-soft mt-1 text-sm">
-            {presentation?.message ??
-              "The pipeline could not complete. Diagnostic details below."}
+        <span className="text-ink min-w-0 flex-1 text-sm font-medium">
+          <span className="text-danger">{title}</span>
+          <span className="text-ink-muted ml-2 hidden text-xs font-normal sm:inline">
+            · pipeline halted
+          </span>
+        </span>
+        <span className="text-ink-muted font-mono text-[10px] tracking-[0.08em] uppercase group-open:hidden">
+          Details
+        </span>
+        <span className="text-ink-muted hidden font-mono text-[10px] tracking-[0.08em] uppercase group-open:inline">
+          Hide
+        </span>
+        <Icon
+          className="text-ink-muted size-4 shrink-0 transition-transform duration-200 group-open:rotate-180"
+          name="chevron-down"
+        />
+      </summary>
+      <div className="border-danger/15 border-t px-4 py-4 sm:px-5 sm:py-5">
+        {presentation?.message ? (
+          <p className="text-ink-soft text-sm leading-6">
+            {presentation.message}
           </p>
-        </div>
+        ) : null}
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 sm:gap-4">
+          <DetailField
+            label="Error kind"
+            value={meeting.errorKind ?? "Unknown"}
+          />
+          <DetailField
+            label="Failed at stage"
+            value={meeting.failedAtStage ?? "Unknown"}
+          />
+          <div className="sm:col-span-2">
+            <dt className="text-ink-muted font-mono text-[11px] tracking-[0.08em] uppercase">
+              Error message
+            </dt>
+            <dd className="border-hairline bg-canvas text-ink-soft mt-2 rounded-lg border p-3 font-mono text-xs leading-relaxed">
+              {meeting.errorMessage ?? "No error message was recorded."}
+            </dd>
+          </div>
+        </dl>
       </div>
-      {presentation?.isRetryable ? (
-        <Form className="mt-5" method="post" preventScrollReset>
-          <input name="_intent" type="hidden" value="retry-meeting" />
-          <button
-            className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.35)] transition active:translate-y-px disabled:cursor-wait disabled:opacity-60"
-            disabled={isRetrying}
-            type="submit"
-          >
-            <Icon className="size-4" name="refresh" />
-            {isRetrying ? "Queueing retry…" : presentation.retryLabel}
-          </button>
-        </Form>
-      ) : null}
-      {retryError ? (
-        <p className="text-danger mt-4 text-sm font-medium">{retryError}</p>
-      ) : null}
-      <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
-        <DetailField
-          label="Error kind"
-          value={meeting.errorKind ?? "Unknown"}
-        />
-        <DetailField
-          label="Failed at stage"
-          value={meeting.failedAtStage ?? "Unknown"}
-        />
-        <div className="sm:col-span-2">
-          <dt className="text-ink-muted font-mono text-[11px] tracking-[0.08em] uppercase">
-            Error message
-          </dt>
-          <dd className="border-danger/15 bg-canvas text-ink-soft mt-2 rounded-lg border p-3 font-mono text-xs leading-relaxed">
-            {meeting.errorMessage ?? "No error message was recorded."}
-          </dd>
-        </div>
-      </dl>
-    </div>
+    </details>
   );
 }
 

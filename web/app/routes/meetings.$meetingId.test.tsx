@@ -120,21 +120,40 @@ function renderMeetingDetailPage({
 }
 
 function renderProcessingPanel({
+  actionData,
   failedAtStage = null,
+  isRetrying = false,
+  meetingForFailure,
   progress = null,
   status,
 }: {
+  actionData?: Parameters<typeof ProcessingPanel>[0]["actionData"];
   failedAtStage?: MeetingStatus | null;
+  isRetrying?: boolean;
+  meetingForFailure?: MeetingDetail;
   progress?: number | null;
   status: MeetingStatus;
 }) {
-  return renderToStaticMarkup(
-    <ProcessingPanel
-      failedAtStage={failedAtStage}
-      progress={progress}
-      status={status}
-    />,
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/",
+        element: (
+          <ProcessingPanel
+            actionData={actionData}
+            failedAtStage={failedAtStage}
+            isRetrying={isRetrying}
+            meeting={meetingForFailure}
+            progress={progress}
+            status={status}
+          />
+        ),
+      },
+    ],
+    { initialEntries: ["/"] },
   );
+
+  return renderToStaticMarkup(<RouterProvider router={router} />);
 }
 
 function meeting(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
@@ -194,24 +213,42 @@ describe("MeetingExportsPanel", () => {
 });
 
 describe("ErrorBlock", () => {
-  test("renders retry action for retryable diarization failures", () => {
+  test("renders as a collapsed disclosure summarizing the failure title", () => {
     const markup = renderErrorBlock({ meeting: meeting() });
 
+    expect(markup).toContain("<details");
+    expect(markup).toContain("<summary");
+    expect(markup).toContain('data-testid="meeting-failure-disclosure"');
+    expect(markup).not.toContain(" open");
     expect(markup).toContain("Speaker identification failed");
-    expect(markup).toContain(
-      "Speaker identification failed. Retry to rerun diarization and summarization using the saved transcript.",
-    );
-    expect(markup).toContain('value="retry-meeting"');
-    expect(markup).toContain("Retry from speaker identification");
   });
 
-  test("shows queueing label while a retry is submitting", () => {
-    const markup = renderErrorBlock({ isRetrying: true, meeting: meeting() });
+  test("never renders a retry control inside the failure disclosure", () => {
+    const markup = renderErrorBlock({ meeting: meeting() });
 
-    expect(markup).toContain("Queueing retry…");
+    expect(markup).not.toContain('value="retry-meeting"');
+    expect(markup).not.toContain("Retry from");
+    expect(markup).not.toContain("Queueing retry");
   });
 
-  test("hides retry for non-retryable failure kinds", () => {
+  test("keeps diagnostic detail markup available behind the disclosure", () => {
+    const markup = renderErrorBlock({
+      meeting: meeting({
+        errorKind: "summarization_failed",
+        errorMessage: "OpenRouter summary response was not valid JSON",
+        failedAtStage: "summarizing",
+      }),
+    });
+
+    expect(markup).toContain("Error kind");
+    expect(markup).toContain("summarization_failed");
+    expect(markup).toContain("Failed at stage");
+    expect(markup).toContain("summarizing");
+    expect(markup).toContain("Error message");
+    expect(markup).toContain("OpenRouter summary response was not valid JSON");
+  });
+
+  test("renders the disclosure for non-retryable failures too", () => {
     for (const nonRetryableMeeting of [
       meeting({
         errorKind: "transcription_empty",
@@ -231,19 +268,89 @@ describe("ErrorBlock", () => {
     ]) {
       const markup = renderErrorBlock({ meeting: nonRetryableMeeting });
 
+      expect(markup).toContain("<details");
+      expect(markup).not.toContain('value="retry-meeting"');
+      expect(markup).not.toContain("Retry from");
+    }
+  });
+});
+
+describe("ProcessingPanel retry affordance", () => {
+  test("renders inline retry beside the failed stage for retryable failures", () => {
+    const failureMeeting = meeting();
+    const markup = renderProcessingPanel({
+      failedAtStage: failureMeeting.failedAtStage,
+      meetingForFailure: failureMeeting,
+      progress: failureMeeting.transcriptionProgress,
+      status: failureMeeting.status,
+    });
+
+    expect(markup).toContain('value="retry-meeting"');
+    expect(markup).toContain("Retry from speaker identification");
+    expect(markup).toContain("Halted");
+  });
+
+  test("shows queueing label while a retry is submitting", () => {
+    const failureMeeting = meeting();
+    const markup = renderProcessingPanel({
+      failedAtStage: failureMeeting.failedAtStage,
+      isRetrying: true,
+      meetingForFailure: failureMeeting,
+      progress: failureMeeting.transcriptionProgress,
+      status: failureMeeting.status,
+    });
+
+    expect(markup).toContain("Queueing retry…");
+  });
+
+  test("hides inline retry when no failure meeting is supplied", () => {
+    const markup = renderProcessingPanel({ status: "transcribing" });
+
+    expect(markup).not.toContain('value="retry-meeting"');
+  });
+
+  test("hides inline retry for non-retryable failure kinds", () => {
+    for (const nonRetryableMeeting of [
+      meeting({
+        errorKind: "transcription_empty",
+        errorMessage: "No speech detected.",
+        failedAtStage: "transcribing",
+      }),
+      meeting({
+        errorKind: "config_missing",
+        errorMessage: "OPENROUTER_API_KEY is missing.",
+        failedAtStage: "summarizing",
+      }),
+      meeting({
+        errorKind: "normalization_failed",
+        errorMessage: "invalid data found while processing input",
+        failedAtStage: "normalizing",
+      }),
+    ]) {
+      const markup = renderProcessingPanel({
+        failedAtStage: nonRetryableMeeting.failedAtStage,
+        meetingForFailure: nonRetryableMeeting,
+        progress: nonRetryableMeeting.transcriptionProgress,
+        status: nonRetryableMeeting.status,
+      });
+
       expect(markup).not.toContain('value="retry-meeting"');
       expect(markup).not.toContain("Retry from");
     }
   });
 
-  test("renders retry validation feedback", () => {
-    const markup = renderErrorBlock({
+  test("renders retry validation feedback under the failed stage", () => {
+    const failureMeeting = meeting();
+    const markup = renderProcessingPanel({
       actionData: {
         ok: false,
         intent: "retry-meeting",
         error: "This failure cannot be retried.",
       },
-      meeting: meeting(),
+      failedAtStage: failureMeeting.failedAtStage,
+      meetingForFailure: failureMeeting,
+      progress: failureMeeting.transcriptionProgress,
+      status: failureMeeting.status,
     });
 
     expect(markup).toContain("This failure cannot be retried.");
@@ -266,15 +373,16 @@ const savedSummary: MeetingSummary = {
 describe("meeting detail export control", () => {
   test("renders export as a compact header action instead of a right-rail card", () => {
     const markup = renderMeetingDetailPage();
-    const source = readFileSync(
-      new URL("./meetings.$meetingId.tsx", import.meta.url),
-      "utf8",
-    );
 
     expect(markup).toContain("Export");
     expect(markup).toContain('aria-label="Open export options"');
     expect(markup).toContain('aria-haspopup="dialog"');
-    expect(source).not.toContain('name="chevron-down"');
+    // Export trigger should not include a chevron-down indicator in its rendered SVG.
+    const exportTriggerMatch = markup.match(
+      /<button[^>]*aria-label="Open export options"[^>]*>[\s\S]*?<\/button>/,
+    );
+    expect(exportTriggerMatch).not.toBeNull();
+    expect(exportTriggerMatch?.[0] ?? "").not.toContain("m6 9 6 6 6-6");
     expect(markup).not.toContain('id="export"');
     expect(markup).not.toContain(
       "Copy or download Markdown generated from the saved meeting data.",
