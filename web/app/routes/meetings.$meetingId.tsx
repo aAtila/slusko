@@ -200,7 +200,6 @@ export default function MeetingDetailPage({
   const titleFeedbackId = "meeting-title-feedback";
   const uploadedLabel = formatMeetingDate(meeting.createdAt);
   const speakerStats = getSpeakerStats(transcriptSegments);
-  const keyTopics = getKeyTopics(summary, transcriptSegments, speakerMap);
 
   useEffect(() => {
     const nextPersistedSpeakerMap = { ...createSpeakerMap(speakerMappings) };
@@ -394,7 +393,7 @@ export default function MeetingDetailPage({
             />
           </div>
 
-          <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+          <aside className="space-y-6">
             <ProcessingPanel
               actionData={actionData}
               failedAtStage={meeting.failedAtStage}
@@ -403,17 +402,18 @@ export default function MeetingDetailPage({
               progress={meeting.transcriptionProgress}
               status={meeting.status}
             />
-            <SpeakersPanel
-              durationSeconds={meeting.durationSeconds}
-              onSpeakerNameChange={updateSpeakerName}
-              onSpeakerNamePersist={persistSpeakerName}
-              onSpeakerNameProtect={protectSpeakerEdit}
-              onSpeakerNameUnprotect={unprotectSpeakerEdit}
-              persistedSpeakerMap={persistedSpeakerMap}
-              speakerMap={speakerMap}
-              speakers={speakerStats}
-            />
-            <HighlightsPanel topics={keyTopics} />
+            <div className="xl:sticky xl:top-6">
+              <SpeakersPanel
+                durationSeconds={meeting.durationSeconds}
+                onSpeakerNameChange={updateSpeakerName}
+                onSpeakerNamePersist={persistSpeakerName}
+                onSpeakerNameProtect={protectSpeakerEdit}
+                onSpeakerNameUnprotect={unprotectSpeakerEdit}
+                persistedSpeakerMap={persistedSpeakerMap}
+                speakerMap={speakerMap}
+                speakers={speakerStats}
+              />
+            </div>
           </aside>
         </div>
       </div>
@@ -1839,66 +1839,6 @@ function SpeakerMappingRow({
         </div>
       </fetcher.Form>
     </li>
-  );
-}
-
-function HighlightsPanel({ topics }: { topics: TopicItem[] }) {
-  if (topics.length === 0) {
-    return (
-      <aside className={railCardClass} id="key-moments">
-        <header className="flex items-center justify-between gap-3">
-          <h2 className="font-display text-ink text-lg font-medium tracking-tight">
-            Key moments
-          </h2>
-        </header>
-        <p className="text-ink-muted mt-4 text-sm leading-6">
-          Highlights appear once summarization completes.
-        </p>
-      </aside>
-    );
-  }
-
-  const dotColors = ["bg-brand", "bg-accent", "bg-warning", "bg-success"];
-
-  return (
-    <aside className={railCardClass} id="key-moments">
-      <header className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-ink text-lg font-medium tracking-tight">
-          Key moments
-        </h2>
-        <span className="text-ink-muted font-mono text-[11px] tracking-[0.06em] uppercase tabular-nums">
-          {topics.length}
-        </span>
-      </header>
-      <ol className="before:bg-hairline-strong relative mt-5 space-y-5 before:absolute before:top-3 before:bottom-3 before:left-[5px] before:w-px">
-        {topics.slice(0, 4).map((topic, index) => (
-          <li
-            className="relative grid grid-cols-[auto_1fr] items-start gap-x-4"
-            key={topic.label}
-          >
-            <span
-              aria-hidden="true"
-              className={`ring-surface relative z-[1] mt-1.5 size-2.5 rounded-full ring-4 ${
-                dotColors[index % dotColors.length]
-              }`}
-            />
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-baseline gap-x-3">
-                <time className="text-ink-muted font-mono text-[11px] tabular-nums">
-                  {topic.timestamp}
-                </time>
-                <h3 className="text-ink text-sm font-medium">{topic.label}</h3>
-              </div>
-              {topic.description ? (
-                <p className="text-ink-muted mt-1 text-xs leading-5">
-                  {topic.description}
-                </p>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </aside>
   );
 }
 
