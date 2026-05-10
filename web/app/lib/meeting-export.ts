@@ -1,15 +1,17 @@
 import type {
   MeetingDetail,
   MeetingSummary,
-  SpeakerMapping,
   TranscriptSegment,
 } from "./meetings-list";
+import { formatDuration, formatTranscriptTimestamp } from "./meetings-list";
+import type { SpeakerMapping } from "./speaker-display";
 import {
   applySpeakerMap,
+  collectSpeakerLabels,
   createSpeakerMap,
-  formatDuration,
-  formatTranscriptTimestamp,
-} from "./meetings-list";
+  formatSpeakerDisplayList,
+  formatSpeakerDisplayOwner,
+} from "./speaker-display";
 
 export type MeetingExportFlavor = "summary" | "full";
 
@@ -26,6 +28,11 @@ export function renderMeetingMarkdownExport(
 ): string {
   const speakerMap = createSpeakerMap(input.speakerMappings);
   const summary = input.summary;
+  const speakerLabels = collectSpeakerLabels({
+    speakerMappings: input.speakerMappings,
+    summary: input.summary,
+    transcriptSegments: input.transcriptSegments,
+  });
 
   const sections = [
     `# ${input.meeting.title}`,
@@ -36,7 +43,10 @@ export function renderMeetingMarkdownExport(
         ? "Not available"
         : formatDuration(input.meeting.durationSeconds)
     }`,
-    `Speakers: ${formatSpeakers(input, speakerMap)}`,
+    `Speakers: ${formatSpeakerDisplayList({
+      labels: speakerLabels,
+      speakerMap,
+    })}`,
     "",
     "## Overview",
     "",
@@ -54,7 +64,7 @@ export function renderMeetingMarkdownExport(
     "",
     formatBulletList(
       (summary?.actionItems ?? []).map((item) => {
-        const owner = formatActionItemOwner(item.owner, speakerMap);
+        const owner = formatSpeakerDisplayOwner(item.owner, speakerMap);
         const task = applySpeakerMap(item.task, speakerMap);
         return `[${owner}] ${task}`;
       }),
@@ -175,74 +185,4 @@ function formatBulletList(items: string[]): string {
   }
 
   return items.map((item) => `- ${item}`).join("\n");
-}
-
-function formatActionItemOwner(
-  owner: MeetingSummary["actionItems"][number]["owner"],
-  speakerMap: ReturnType<typeof createSpeakerMap>,
-): string {
-  switch (owner.kind) {
-    case "name":
-      return owner.value;
-    case "speaker":
-      return applySpeakerMap(owner.value, speakerMap);
-    case "unknown":
-      return "Unassigned";
-    default: {
-      const exhaustive: never = owner;
-      return exhaustive;
-    }
-  }
-}
-
-function formatSpeakers(
-  input: MeetingExportInput,
-  speakerMap: ReturnType<typeof createSpeakerMap>,
-): string {
-  const labels = new Set<string>();
-
-  for (const mapping of input.speakerMappings) {
-    labels.add(mapping.speakerLabel);
-  }
-
-  for (const segment of input.transcriptSegments) {
-    labels.add(segment.speakerLabel);
-  }
-
-  if (input.summary !== null) {
-    for (const label of extractSpeakerLabels(input.summary.overview)) {
-      labels.add(label);
-    }
-
-    for (const decision of input.summary.decisions) {
-      for (const label of extractSpeakerLabels(decision.text)) {
-        labels.add(label);
-      }
-    }
-
-    for (const actionItem of input.summary.actionItems) {
-      for (const label of extractSpeakerLabels(actionItem.task)) {
-        labels.add(label);
-      }
-
-      if (actionItem.owner.kind === "speaker") {
-        labels.add(actionItem.owner.value);
-      }
-    }
-
-    for (const question of input.summary.openQuestions) {
-      for (const label of extractSpeakerLabels(question.text)) {
-        labels.add(label);
-      }
-    }
-  }
-
-  const values = Array.from(labels).map((label) =>
-    applySpeakerMap(label, speakerMap),
-  );
-  return values.length === 0 ? "None" : values.join(", ");
-}
-
-function extractSpeakerLabels(text: string): string[] {
-  return text.match(/SPEAKER_\d+/g) ?? [];
 }

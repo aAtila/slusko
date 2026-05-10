@@ -6,9 +6,9 @@ import type { MeetingStatus, SummaryRegenerationStatus } from "~/db/schema";
 import type {
   MeetingDetail,
   MeetingSummary,
-  SpeakerMap,
   TranscriptSegment,
 } from "~/lib/meetings-list";
+import type { SpeakerMap } from "~/lib/speaker-display";
 import MeetingDetailPage, {
   ErrorBlock,
   getObservedSummaryRegenerationNotice,

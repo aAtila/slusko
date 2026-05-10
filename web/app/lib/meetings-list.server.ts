@@ -18,9 +18,9 @@ import type {
   MeetingDetail,
   MeetingDetailRouteData,
   MeetingSummary,
-  SpeakerMapping,
   TranscriptSegment,
 } from "./meetings-list";
+import type { SpeakerMapping } from "./speaker-display";
 
 export type HomeMeetingListRow = {
   id: string;

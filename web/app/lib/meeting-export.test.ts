@@ -8,9 +8,9 @@ import {
 import type {
   MeetingDetail,
   MeetingSummary,
-  SpeakerMapping,
   TranscriptSegment,
 } from "./meetings-list";
+import type { SpeakerMapping } from "./speaker-display";
 
 type MeetingExportInput = {
   meeting: Pick<MeetingDetail, "title" | "createdAt" | "durationSeconds">;

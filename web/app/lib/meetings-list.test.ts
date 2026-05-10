@@ -5,7 +5,6 @@ import {
 } from "./meeting-language";
 import type { HomeMeetingListItem } from "./meetings-list";
 import {
-  applySpeakerMap,
   formatDuration,
   formatTranscriptTimestamp,
   getMeetingFailurePresentation,
@@ -30,52 +29,6 @@ function meeting(overrides: Partial<HomeMeetingListItem>): HomeMeetingListItem {
     ...overrides,
   };
 }
-
-describe("speaker mapping display helpers", () => {
-  test("applies a full speaker mapping fixture", () => {
-    expect(
-      applySpeakerMap("SPEAKER_00 handed off to SPEAKER_01.", {
-        SPEAKER_00: "Atila",
-        SPEAKER_01: "Marko",
-      }),
-    ).toBe("Atila handed off to Marko.");
-  });
-
-  test("leaves unmapped speakers as raw labels in a partial mapping fixture", () => {
-    expect(
-      applySpeakerMap("SPEAKER_00 asked SPEAKER_02 to follow up.", {
-        SPEAKER_00: "Atila",
-      }),
-    ).toBe("Atila asked SPEAKER_02 to follow up.");
-  });
-
-  test("leaves text unchanged for an empty mapping fixture", () => {
-    expect(applySpeakerMap("SPEAKER_00 and SPEAKER_01 joined.", {})).toBe(
-      "SPEAKER_00 and SPEAKER_01 joined.",
-    );
-  });
-
-  test("replaces labels with substring-safe boundaries", () => {
-    expect(
-      applySpeakerMap(
-        "SPEAKER_01, SPEAKER_010, SPEAKER_1, and SPEAKER_10 are distinct.",
-        {
-          SPEAKER_01: "Ana",
-          SPEAKER_1: "Mila",
-        },
-      ),
-    ).toBe("Ana, SPEAKER_010, Mila, and SPEAKER_10 are distinct.");
-  });
-
-  test("does not cascade replacements through mapped names", () => {
-    expect(
-      applySpeakerMap("SPEAKER_00 handed off to SPEAKER_01.", {
-        SPEAKER_00: "SPEAKER_01",
-        SPEAKER_01: "Marko",
-      }),
-    ).toBe("SPEAKER_01 handed off to Marko.");
-  });
-});
 
 describe("meeting failure presentation helpers", () => {
   test("returns no failure presentation for non-error meetings", () => {

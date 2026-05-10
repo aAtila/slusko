@@ -10,11 +10,7 @@ import {
   useRevalidator,
 } from "react-router";
 import { Icon } from "~/components/app-icons";
-import type {
-  MeetingStatus,
-  SummaryActionItemOwner,
-  SummaryRegenerationStatus,
-} from "~/db/schema";
+import type { MeetingStatus, SummaryRegenerationStatus } from "~/db/schema";
 import type { MeetingDetailActionData as MeetingActionData } from "~/lib/meeting-detail-action.server";
 import type { MeetingExportFlavor } from "~/lib/meeting-export";
 import {
@@ -22,8 +18,6 @@ import {
   languageToFormValue,
 } from "~/lib/meeting-language";
 import {
-  applySpeakerMap,
-  createSpeakerMap,
   formatDuration,
   formatTranscriptTimestamp,
   getMeetingFailurePresentation,
@@ -32,9 +26,14 @@ import {
   type MeetingDetail,
   type MeetingStatusTone,
   type MeetingSummary,
-  type SpeakerMap,
   type TranscriptSegment,
 } from "~/lib/meetings-list";
+import {
+  applySpeakerMap,
+  createSpeakerMap,
+  formatSpeakerDisplayOwner,
+  type SpeakerMap,
+} from "~/lib/speaker-display";
 import type { Route } from "./+types/meetings.$meetingId";
 
 const cardClass =
@@ -1030,7 +1029,7 @@ export function SummaryPanel({
                   {applySpeakerMap(item.task, speakerMap)}
                 </p>
                 <p className="text-ink-muted mt-1.5 font-mono text-[10px] tracking-[0.14em] uppercase">
-                  Owner: {renderActionItemOwner(item.owner, speakerMap)}
+                  Owner: {formatSpeakerDisplayOwner(item.owner, speakerMap)}
                 </p>
               </div>
             )}
@@ -1298,21 +1297,6 @@ function SummarySection<T>({
       ) : null}
     </section>
   );
-}
-
-function renderActionItemOwner(
-  owner: SummaryActionItemOwner,
-  speakerMap: SpeakerMap,
-) {
-  if (owner.kind === "unknown") {
-    return "Unassigned";
-  }
-
-  if (owner.kind === "speaker") {
-    return applySpeakerMap(owner.value, speakerMap);
-  }
-
-  return owner.value;
 }
 
 export function TranscriptPanel({
