@@ -1,0 +1,18 @@
+{
+  "id": "01_serbian_no_real_names",
+  "description": "Serbian-only standup-style meeting, only SPEAKER_NN labels, no real names mentioned anywhere. Smoking-gun test for the 'Atila' hallucination — every named-owner claim from the model is false by construction.",
+  "dominant_language": "sr",
+  "expected_script": "latin",
+  "named_people_in_transcript": [],
+  "segments": [
+    { "start_seconds": 0.0, "end_seconds": 4.5, "speaker_label": "SPEAKER_00", "text": "Dobro, hajde da krenemo. Imamo tri stvari za danas." },
+    { "start_seconds": 4.5, "end_seconds": 12.0, "speaker_label": "SPEAKER_00", "text": "Prvo, treba da se dogovorimo oko deploy-a u petak. Drugo, neko mora da pripremi release notes. I treće, imamo problem sa staging bazom." },
+    { "start_seconds": 12.5, "end_seconds": 18.0, "speaker_label": "SPEAKER_01", "text": "Što se tiče deploy-a, predlažem da to uradimo u petak ujutro, oko devet sati." },
+    { "start_seconds": 18.5, "end_seconds": 22.0, "speaker_label": "SPEAKER_00", "text": "Slažem se. Petak ujutro, devet sati. Dogovoreno." },
+    { "start_seconds": 23.0, "end_seconds": 31.0, "speaker_label": "SPEAKER_02", "text": "Ja ću napisati release notes do četvrtka uveče. Trebaće mi spisak svih merge-ovanih PR-ova." },
+    { "start_seconds": 31.5, "end_seconds": 35.0, "speaker_label": "SPEAKER_00", "text": "Super. Ja ću ti poslati listu PR-ova sutra ujutro." },
+    { "start_seconds": 36.0, "end_seconds": 44.0, "speaker_label": "SPEAKER_01", "text": "Sad oko staging baze. Neko se žalio da je spora poslednjih dana, ali nije jasno šta tačno." },
+    { "start_seconds": 44.5, "end_seconds": 50.0, "speaker_label": "SPEAKER_02", "text": "Mogli bismo da pogledamo metrike, ali nisam siguran ko bi to trebalo da uradi." },
+    { "start_seconds": 50.5, "end_seconds": 54.0, "speaker_label": "SPEAKER_00", "text": "Ostavićemo to za sledeću nedelju onda. Vidimo se." }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "05_relitigated_decision",
+  "description": "English meeting where the same decision (canceling Wednesday standup) is raised, debated, and re-confirmed three times across the meeting. Tests whether the prompt deduplicates within categories instead of emitting three near-identical decisions.",
+  "dominant_language": "en",
+  "expected_script": "latin",
+  "named_people_in_transcript": [],
+  "segments": [
+    { "start_seconds": 0.0, "end_seconds": 7.0, "speaker_label": "SPEAKER_00", "text": "First thing — I think we should cancel the Wednesday standup. It is almost always empty and the Monday one covers everything." },
+    { "start_seconds": 7.5, "end_seconds": 12.0, "speaker_label": "SPEAKER_01", "text": "Yeah, agreed. Let us drop Wednesday. Monday standup stays." },
+    { "start_seconds": 12.5, "end_seconds": 18.0, "speaker_label": "SPEAKER_02", "text": "Sure, fine by me. So no more Wednesday standup starting next week, right?" },
+    { "start_seconds": 18.5, "end_seconds": 21.0, "speaker_label": "SPEAKER_00", "text": "Right, starting next week. No Wednesday standup." },
+    { "start_seconds": 22.0, "end_seconds": 28.0, "speaker_label": "SPEAKER_01", "text": "Moving on. We need to finalize the Q3 roadmap by end of month. Anyone want to take that?" },
+    { "start_seconds": 28.5, "end_seconds": 33.0, "speaker_label": "SPEAKER_02", "text": "I can drive the roadmap doc. I will have a draft by next Friday." },
+    { "start_seconds": 33.5, "end_seconds": 39.0, "speaker_label": "SPEAKER_00", "text": "Wait, going back to the standup thing — are we really sure dropping Wednesday is the right call? People might miss it." },
+    { "start_seconds": 39.5, "end_seconds": 45.0, "speaker_label": "SPEAKER_01", "text": "We just talked about this. Yes, we are dropping it. We can always bring it back if it is a problem." },
+    { "start_seconds": 45.5, "end_seconds": 48.0, "speaker_label": "SPEAKER_00", "text": "OK, fair. Wednesday standup is canceled. Final answer." },
+    { "start_seconds": 48.5, "end_seconds": 52.0, "speaker_label": "SPEAKER_02", "text": "So just to confirm — Wednesday standup is gone, Monday stays. Yes?" },
+    { "start_seconds": 52.5, "end_seconds": 54.0, "speaker_label": "SPEAKER_00", "text": "Yes. Confirmed." }
+  ]
+}

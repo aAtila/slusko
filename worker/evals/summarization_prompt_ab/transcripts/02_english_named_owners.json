@@ -1,0 +1,19 @@
+{
+  "id": "02_english_named_owners",
+  "description": "English meeting with three clearly-named participants (Marko, Jelena, James). Tests legitimate name use and that 'Atila' (from the production prompt example) does not bleed into outputs even when other names are present.",
+  "dominant_language": "en",
+  "expected_script": "latin",
+  "named_people_in_transcript": ["Marko", "Jelena", "James"],
+  "segments": [
+    { "start_seconds": 0.0, "end_seconds": 5.0, "speaker_label": "SPEAKER_00", "text": "Alright everyone, thanks for joining. Marko, Jelena, James — let's go through the launch checklist." },
+    { "start_seconds": 5.5, "end_seconds": 12.0, "speaker_label": "SPEAKER_01", "text": "Sure. So Marko, you were going to handle the database migration script. Where are we on that?" },
+    { "start_seconds": 12.5, "end_seconds": 19.0, "speaker_label": "SPEAKER_02", "text": "I have got the migration ready. I will run it against staging tomorrow morning and send the diff to the channel." },
+    { "start_seconds": 19.5, "end_seconds": 26.0, "speaker_label": "SPEAKER_01", "text": "Great. Jelena, can you take the customer-facing announcement? We need a draft by Wednesday." },
+    { "start_seconds": 26.5, "end_seconds": 31.0, "speaker_label": "SPEAKER_03", "text": "Yes, I will have a draft ready by Tuesday end of day so we have a buffer." },
+    { "start_seconds": 31.5, "end_seconds": 38.0, "speaker_label": "SPEAKER_01", "text": "Perfect. James, you are on the rollback plan, right? Make sure ops sign off before Friday." },
+    { "start_seconds": 38.5, "end_seconds": 43.0, "speaker_label": "SPEAKER_04", "text": "Yep, I will get sign-off by Thursday. I have already sent the draft to the ops lead." },
+    { "start_seconds": 43.5, "end_seconds": 50.0, "speaker_label": "SPEAKER_00", "text": "Good. We agreed in the last sync we are launching Friday at 2pm — confirming that is still the plan." },
+    { "start_seconds": 50.5, "end_seconds": 53.0, "speaker_label": "SPEAKER_02", "text": "Confirmed from my side." },
+    { "start_seconds": 53.5, "end_seconds": 56.0, "speaker_label": "SPEAKER_03", "text": "Same. Friday 2pm." }
+  ]
+}

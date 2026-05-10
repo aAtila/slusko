@@ -1,0 +1,18 @@
+{
+  "id": "03_serbian_english_mix_technical",
+  "description": "Serbian-dominant engineering discussion with English technical terms (Postgres, API, deployment, merge, pull request). Tests the language rule (overview should be Serbian Latin) and the technical-term-preservation rule.",
+  "dominant_language": "sr",
+  "expected_script": "latin",
+  "named_people_in_transcript": ["Jovana"],
+  "segments": [
+    { "start_seconds": 0.0, "end_seconds": 6.0, "speaker_label": "SPEAKER_00", "text": "Hajde da pričamo o tome kako ćemo migrirati na novi Postgres klaster. Imamo dva pull request-a otvorena." },
+    { "start_seconds": 6.5, "end_seconds": 14.0, "speaker_label": "SPEAKER_01", "text": "Prvi pull request menja samo connection string i environment variables. Drugi pull request dodaje novu API rutu za health check." },
+    { "start_seconds": 14.5, "end_seconds": 20.0, "speaker_label": "SPEAKER_00", "text": "Jovana, možeš ti da uradiš review prvog pull request-a danas?" },
+    { "start_seconds": 20.5, "end_seconds": 26.0, "speaker_label": "SPEAKER_02", "text": "Mogu, ali tek posle ručka. Da li želiš i da ga merge-ujem ako sve bude u redu?" },
+    { "start_seconds": 26.5, "end_seconds": 30.0, "speaker_label": "SPEAKER_00", "text": "Da, merge ga slobodno čim potvrdiš da staging radi." },
+    { "start_seconds": 30.5, "end_seconds": 38.0, "speaker_label": "SPEAKER_01", "text": "Što se tiče deployment-a u produkciju, mislim da treba da sačekamo do ponedeljka. Ne želim da deploy-ujem petkom." },
+    { "start_seconds": 38.5, "end_seconds": 42.0, "speaker_label": "SPEAKER_00", "text": "U redu, dogovoreno. Production deployment u ponedeljak ujutro." },
+    { "start_seconds": 42.5, "end_seconds": 49.0, "speaker_label": "SPEAKER_01", "text": "Još jedna stvar — treba da odlučimo da li ćemo koristiti pgbouncer ili ne. Trenutno mi nije jasno koji je pravi izbor." },
+    { "start_seconds": 49.5, "end_seconds": 54.0, "speaker_label": "SPEAKER_00", "text": "To ostavimo za posle migracije. Pričaćemo o tome sledeće nedelje." }
+  ]
+}

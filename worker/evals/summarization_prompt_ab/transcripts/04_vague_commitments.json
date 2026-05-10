@@ -1,0 +1,17 @@
+{
+  "id": "04_vague_commitments",
+  "description": "English meeting full of hedges and tentative language ('maybe', 'probably', 'we should think about it', 'I will look into it'). Tests whether the prompt correctly classifies undecided topics as openQuestions rather than decisions or action items.",
+  "dominant_language": "en",
+  "expected_script": "latin",
+  "named_people_in_transcript": [],
+  "segments": [
+    { "start_seconds": 0.0, "end_seconds": 6.0, "speaker_label": "SPEAKER_00", "text": "So one thing we should probably think about is whether to switch from Redis to something else. I have heard good things about KeyDB." },
+    { "start_seconds": 6.5, "end_seconds": 12.0, "speaker_label": "SPEAKER_01", "text": "Maybe. I am not really sure it is worth the migration cost right now. Let us keep it on the radar." },
+    { "start_seconds": 12.5, "end_seconds": 19.0, "speaker_label": "SPEAKER_00", "text": "Yeah, I will look into it a bit and we can revisit. Not committing to anything yet." },
+    { "start_seconds": 19.5, "end_seconds": 26.0, "speaker_label": "SPEAKER_01", "text": "There is also the question of whether we want to introduce feature flags. I am leaning yes but I have not fully thought it through." },
+    { "start_seconds": 26.5, "end_seconds": 32.0, "speaker_label": "SPEAKER_00", "text": "I think feature flags are inevitable eventually. But not this quarter — we have too much else going on." },
+    { "start_seconds": 32.5, "end_seconds": 39.0, "speaker_label": "SPEAKER_01", "text": "Right. Maybe we revisit in Q2. Open question for now." },
+    { "start_seconds": 39.5, "end_seconds": 46.0, "speaker_label": "SPEAKER_00", "text": "One thing I am sure about: we are dropping support for the old export format at the end of next month. We have talked about it three times and the deprecation banner has been up for two months." },
+    { "start_seconds": 46.5, "end_seconds": 50.0, "speaker_label": "SPEAKER_01", "text": "Agreed. End of next month, old export format is gone. That one is settled." }
+  ]
+}
