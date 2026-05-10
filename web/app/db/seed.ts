@@ -1,9 +1,11 @@
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db, sqlClient } from "./client.server";
-import { meetings, transcriptSegments } from "./schema";
+import { meetings, summaryVersions, transcriptSegments } from "./schema";
 import {
   developmentMeetingSeeds,
+  developmentSummaryVersionSeeds,
   developmentTranscriptSegmentSeeds,
+  seedUpdatedAt,
 } from "./seed-data";
 
 export async function seedDevelopmentMeetings({ reset = false } = {}) {
@@ -38,6 +40,15 @@ export async function seedDevelopmentMeetings({ reset = false } = {}) {
       });
 
     await tx
+      .update(meetings)
+      .set({ latestSummaryVersionId: null })
+      .where(inArray(meetings.id, developmentMeetingIds));
+
+    await tx
+      .delete(summaryVersions)
+      .where(inArray(summaryVersions.meetingId, developmentMeetingIds));
+
+    await tx
       .delete(transcriptSegments)
       .where(inArray(transcriptSegments.meetingId, developmentMeetingIds));
 
@@ -46,6 +57,20 @@ export async function seedDevelopmentMeetings({ reset = false } = {}) {
         .insert(transcriptSegments)
         .values(developmentTranscriptSegmentSeeds)
         .onConflictDoNothing();
+    }
+
+    if (developmentSummaryVersionSeeds.length > 0) {
+      await tx.insert(summaryVersions).values(developmentSummaryVersionSeeds);
+
+      for (const summaryVersion of developmentSummaryVersionSeeds) {
+        await tx
+          .update(meetings)
+          .set({
+            latestSummaryVersionId: summaryVersion.id,
+            updatedAt: seedUpdatedAt,
+          })
+          .where(eq(meetings.id, summaryVersion.meetingId));
+      }
     }
   });
 

@@ -1,8 +1,8 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
   meetings,
   speakerMappings,
-  summaries,
+  summaryVersions,
   transcriptSegments,
   type ErrorKind,
   type MeetingStatus,
@@ -214,14 +214,21 @@ async function findSummaryByMeetingId(
   const database = await getDatabase();
   const [row] = await database
     .select({
-      overview: summaries.overview,
-      decisions: summaries.decisions,
-      actionItems: summaries.actionItems,
-      openQuestions: summaries.openQuestions,
-      updatedAt: summaries.updatedAt,
+      overview: summaryVersions.overview,
+      decisions: summaryVersions.decisions,
+      actionItems: summaryVersions.actionItems,
+      openQuestions: summaryVersions.openQuestions,
+      updatedAt: summaryVersions.updatedAt,
     })
-    .from(summaries)
-    .where(eq(summaries.meetingId, meetingId))
+    .from(meetings)
+    .innerJoin(
+      summaryVersions,
+      and(
+        eq(summaryVersions.id, meetings.latestSummaryVersionId),
+        eq(summaryVersions.meetingId, meetings.id),
+      ),
+    )
+    .where(eq(meetings.id, meetingId))
     .limit(1);
 
   return row ?? null;

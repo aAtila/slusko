@@ -276,43 +276,45 @@ where id = %(meeting_id)s
   and status = 'summarizing'
 """
 
-UPSERT_SUMMARY_SQL = """
-insert into summaries (
-  meeting_id,
-  overview,
-  decisions,
-  action_items,
-  open_questions
-) values (
-  %(meeting_id)s,
-  %(overview)s,
-  %(decisions)s,
-  %(action_items)s,
-  %(open_questions)s
-)
-on conflict (meeting_id) do update
-set
-  overview = excluded.overview,
-  decisions = excluded.decisions,
-  action_items = excluded.action_items,
-  open_questions = excluded.open_questions,
-  updated_at = now()
-"""
-
-UPDATE_SUMMARY_SQL = """
-update summaries
-set
-  overview = %(overview)s,
-  decisions = %(decisions)s,
-  action_items = %(action_items)s,
-  open_questions = %(open_questions)s,
-  updated_at = now()
-where meeting_id = %(meeting_id)s
-"""
-
 MARK_SUMMARIZATION_SUCCEEDED_SQL = """
-update meetings
+with candidate as (
+  select id
+  from meetings
+  where id = %(meeting_id)s
+    and status = 'summarizing'
+  for update
+), version as (
+  insert into summary_versions (
+    meeting_id,
+    version_number,
+    source,
+    overview,
+    decisions,
+    action_items,
+    open_questions
+  )
+  select
+    candidate.id as meeting_id,
+    1 as version_number,
+    'initial'::summary_version_source as source,
+    %(overview)s,
+    %(decisions)s,
+    %(action_items)s,
+    %(open_questions)s
+  from candidate
+  on conflict (meeting_id, version_number) do update
+  set
+    source = excluded.source,
+    overview = excluded.overview,
+    decisions = excluded.decisions,
+    action_items = excluded.action_items,
+    open_questions = excluded.open_questions,
+    updated_at = now()
+  returning id, meeting_id
+)
+update meetings as meeting
 set
+  latest_summary_version_id = version.id,
   status = 'done',
   resume_from_stage = null,
   transcription_progress = 100,
@@ -320,19 +322,62 @@ set
   error_message = null,
   failed_at_stage = null,
   updated_at = now()
-where id = %(meeting_id)s
-  and status = 'summarizing'
+from candidate
+join version on version.meeting_id = candidate.id
+where meeting.id = candidate.id
+  and meeting.status = 'summarizing'
+returning meeting.id
 """
 
 MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL = """
-update meetings
+with candidate as (
+  select
+    meeting.id as meeting_id,
+    latest.id as source_summary_version_id,
+    latest.version_number + 1 as version_number
+  from meetings as meeting
+  join summary_versions as latest
+    on latest.meeting_id = meeting.id
+    and latest.id = meeting.latest_summary_version_id
+  where meeting.id = %(meeting_id)s
+    and meeting.status = 'done'
+    and meeting.summary_regeneration_status = 'processing'
+  for update of meeting
+), version as (
+  insert into summary_versions (
+    meeting_id,
+    version_number,
+    source,
+    source_summary_version_id,
+    overview,
+    decisions,
+    action_items,
+    open_questions
+  )
+  select
+    candidate.meeting_id,
+    candidate.version_number,
+    'ai_revision'::summary_version_source as source,
+    candidate.source_summary_version_id,
+    %(overview)s,
+    %(decisions)s,
+    %(action_items)s,
+    %(open_questions)s
+  from candidate
+  returning id, meeting_id
+)
+update meetings as meeting
 set
+  latest_summary_version_id = version.id,
   summary_regeneration_status = 'idle',
   summary_regeneration_processing_started_at = null,
   updated_at = now()
-where id = %(meeting_id)s
-  and status = 'done'
-  and summary_regeneration_status = 'processing'
+from candidate
+join version on version.meeting_id = candidate.meeting_id
+where meeting.id = candidate.meeting_id
+  and meeting.status = 'done'
+  and meeting.summary_regeneration_status = 'processing'
+returning meeting.id
 """
 
 MARK_SUMMARY_REGENERATION_FAILED_SQL = """
@@ -534,18 +579,14 @@ class PostgresMeetingQueue:
         meeting: QueuedMeeting,
         summary: SummaryDraft,
     ) -> None:
-        """Upsert the structured summary and finish the meeting idempotently."""
+        """Write initial summary version 1 and finish the meeting atomically."""
 
         with self._connection_factory() as connection:
             with connection.transaction():
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        UPSERT_SUMMARY_SQL,
-                        _summary_params(meeting=meeting, summary=summary),
-                    )
-                    cursor.execute(
                         MARK_SUMMARIZATION_SUCCEEDED_SQL,
-                        {"meeting_id": meeting.id},
+                        _summary_params(meeting=meeting, summary=summary),
                     )
                     if cursor.rowcount != 1:
                         raise RuntimeError(
@@ -558,21 +599,16 @@ class PostgresMeetingQueue:
         meeting: QueuedMeeting,
         summary: SummaryDraft,
     ) -> None:
-        """Overwrite the current summary and finish regeneration if rows still exist."""
+        """Append a summary version and finish regeneration if latest still exists."""
 
         with self._connection_factory() as connection:
             with connection.transaction():
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        UPDATE_SUMMARY_SQL,
+                        MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL,
                         _summary_params(meeting=meeting, summary=summary),
                     )
-                    if cursor.rowcount == 1:
-                        cursor.execute(
-                            MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL,
-                            {"meeting_id": meeting.id},
-                        )
-                    else:
+                    if cursor.rowcount != 1:
                         cursor.execute(
                             MARK_SUMMARY_REGENERATION_FAILED_SQL,
                             {"meeting_id": meeting.id},

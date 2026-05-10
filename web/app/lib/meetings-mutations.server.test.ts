@@ -27,7 +27,7 @@ describe("summary regeneration mutations", () => {
           id,
           status: "done",
           summaryRegenerationStatus: "idle",
-          hasSummary: true,
+          latestSummaryVersionId: "00000000-0000-4000-8000-000000000106",
         }),
         queueSummaryRegenerationById: async (id) => {
           queuedMeetings.push(id);
@@ -78,7 +78,7 @@ describe("summary regeneration mutations", () => {
           id,
           status: "done",
           summaryRegenerationStatus: "idle",
-          hasSummary: true,
+          latestSummaryVersionId: "00000000-0000-4000-8000-000000000106",
         }),
       },
     );
@@ -103,6 +103,14 @@ describe("summary regeneration mutations", () => {
     ).toBe(true);
     expect(
       statements.some((statement) =>
+        statement.includes("latest_summary_version_id is not null"),
+      ),
+    ).toBe(true);
+    expect(
+      statements.some((statement) => statement.includes("from summaries")),
+    ).toBe(false);
+    expect(
+      statements.some((statement) =>
         statement.includes("pg_notify('meetings_pending'"),
       ),
     ).toBe(true);
@@ -118,7 +126,7 @@ describe("summary regeneration mutations", () => {
           id,
           status: "done",
           summaryRegenerationStatus: "failed",
-          hasSummary: true,
+          latestSummaryVersionId: "00000000-0000-4000-8000-000000000106",
         }),
         queueSummaryRegenerationById: async (id) => {
           queuedMeetings.push(id);
@@ -175,13 +183,13 @@ describe("summary regeneration mutations", () => {
       {
         status: "summarizing" as const,
         summaryRegenerationStatus: "idle" as const,
-        hasSummary: true,
+        latestSummaryVersionId: "00000000-0000-4000-8000-000000000106",
         message: "Only completed meetings can regenerate summaries.",
       },
       {
         status: "done" as const,
         summaryRegenerationStatus: "idle" as const,
-        hasSummary: false,
+        latestSummaryVersionId: null,
         message:
           "Only meetings with an existing summary can regenerate summaries.",
       },
@@ -197,7 +205,7 @@ describe("summary regeneration mutations", () => {
               id,
               status: input.status,
               summaryRegenerationStatus: input.summaryRegenerationStatus,
-              hasSummary: input.hasSummary,
+              latestSummaryVersionId: input.latestSummaryVersionId,
             }),
             queueSummaryRegenerationById: async () => {
               queueWasCalled = true;
@@ -231,7 +239,7 @@ describe("summary regeneration mutations", () => {
               id,
               status: "done",
               summaryRegenerationStatus,
-              hasSummary: true,
+              latestSummaryVersionId: "00000000-0000-4000-8000-000000000106",
             };
           },
           queueSummaryRegenerationById: async () => null,
@@ -257,7 +265,7 @@ describe("summary regeneration mutations", () => {
               id,
               status: "done",
               summaryRegenerationStatus,
-              hasSummary: true,
+              latestSummaryVersionId: "00000000-0000-4000-8000-000000000106",
             }),
             queueSummaryRegenerationById: async () => {
               queueWasCalled = true;

@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { meetingStatus, summaryRegenerationStatus } from "./schema";
+import {
+  meetingStatus,
+  summaryRegenerationStatus,
+  summaryVersionSource,
+} from "./schema";
 import {
   developmentMeetingSeeds,
+  developmentSummaryVersionSeeds,
   developmentTranscriptSegmentSeeds,
 } from "./seed-data";
 
@@ -20,6 +25,14 @@ describe("development meeting seeds", () => {
       "pending",
       "processing",
       "failed",
+    ]);
+  });
+
+  test("defines the summary version provenance sources", () => {
+    expect(summaryVersionSource.enumValues).toEqual([
+      "initial",
+      "ai_revision",
+      "reset",
     ]);
   });
 
@@ -82,6 +95,24 @@ describe("development meeting seeds", () => {
         (meeting) => meeting.status !== "done" && meeting.status !== "error",
       ),
     ).toBe(true);
+  });
+
+  test("include latest summary version seeds for completed meetings", () => {
+    const meetingIds = new Set(
+      developmentMeetingSeeds.map((meeting) => meeting.id),
+    );
+    const summaryVersionIds = developmentSummaryVersionSeeds.map(
+      (summaryVersion) => summaryVersion.id,
+    );
+
+    expect(developmentSummaryVersionSeeds.length).toBeGreaterThan(0);
+    expect(new Set(summaryVersionIds).size).toBe(summaryVersionIds.length);
+
+    for (const summaryVersion of developmentSummaryVersionSeeds) {
+      expect(meetingIds.has(summaryVersion.meetingId)).toBe(true);
+      expect(summaryVersion.versionNumber).toBe(1);
+      expect(summaryVersion.source).toBe("initial");
+    }
   });
 
   test("include transcript rows for lifecycle states that should render them", () => {

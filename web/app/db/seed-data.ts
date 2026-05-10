@@ -1,11 +1,12 @@
-import type { meetings, transcriptSegments } from "./schema";
+import type { meetings, summaryVersions, transcriptSegments } from "./schema";
 
 export type DevelopmentMeetingSeed = typeof meetings.$inferInsert;
 export type DevelopmentTranscriptSegmentSeed =
   typeof transcriptSegments.$inferInsert;
+export type DevelopmentSummaryVersionSeed = typeof summaryVersions.$inferInsert;
 
-const seedCreatedAt = new Date("2026-05-04T09:00:00.000Z");
-const seedUpdatedAt = new Date("2026-05-04T09:00:00.000Z");
+export const seedCreatedAt = new Date("2026-05-04T09:00:00.000Z");
+export const seedUpdatedAt = new Date("2026-05-04T09:00:00.000Z");
 
 export const developmentMeetingSeeds = [
   {
@@ -144,6 +145,29 @@ export const developmentMeetingSeeds = [
     updatedAt: seedUpdatedAt,
   },
 ] satisfies DevelopmentMeetingSeed[];
+
+export const developmentSummaryVersionSeeds = [
+  {
+    id: "33333333-3333-4333-8333-333333333391",
+    meetingId: "33333333-3333-4333-8333-333333333333",
+    versionNumber: 1,
+    source: "initial",
+    sourceRevisionRequestId: null,
+    sourceSummaryVersionId: null,
+    overview:
+      "The team reviewed the sprint retro and agreed to tighten handoffs before closing work.",
+    decisions: [{ text: "Document owners before closing each retro item." }],
+    actionItems: [
+      {
+        task: "Add owner notes to follow-up retro items",
+        owner: { kind: "speaker", value: "SPEAKER_01" },
+      },
+    ],
+    openQuestions: [{ text: "Which handoffs need a written checklist?" }],
+    createdAt: seedCreatedAt,
+    updatedAt: seedUpdatedAt,
+  },
+] satisfies DevelopmentSummaryVersionSeed[];
 
 export const developmentTranscriptSegmentSeeds = [
   {

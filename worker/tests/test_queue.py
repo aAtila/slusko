@@ -627,8 +627,8 @@ def test_mark_summarization_started_clears_errors_and_preserves_transcript_rows(
     assert params == {"meeting_id": meeting.id}
 
 
-def test_mark_summarization_succeeded_upserts_summary_and_marks_done() -> None:
-    connection = RecordingConnection(row=None, rowcounts=[1, 1])
+def test_mark_summarization_succeeded_writes_initial_summary_version_and_marks_done() -> None:
+    connection = RecordingConnection(row=None, rowcount=1)
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
         id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -658,31 +658,35 @@ def test_mark_summarization_succeeded_upserts_summary_and_marks_done() -> None:
     queue.mark_summarization_succeeded(meeting=meeting, summary=summary)
 
     statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
-    assert len(statements) == 2
-    upsert_sql, upsert_params = statements[0]
-    assert upsert_sql.startswith("insert into summaries")
-    assert "on conflict (meeting_id) do update" in upsert_sql
-    assert isinstance(upsert_params, dict)
-    assert upsert_params["meeting_id"] == meeting.id
-    assert upsert_params["overview"] == "Meeting overview"
-    assert upsert_params["decisions"].obj == [{"text": "Ship it"}]
-    assert upsert_params["action_items"].obj == [
+    assert len(statements) == 1
+    sql, params = statements[0]
+    assert sql.startswith("with candidate as")
+    assert "insert into summary_versions" in sql
+    assert "insert into summaries" not in sql
+    assert "version_number" in sql
+    assert "1 as version_number" in sql
+    assert "'initial'::summary_version_source as source" in sql
+    assert "on conflict (meeting_id, version_number) do update" in sql
+    assert "latest_summary_version_id = version.id" in sql
+    assert "status = 'done'" in sql
+    assert "transcription_progress = 100" in sql
+    assert "error_kind = null" in sql
+    assert "error_message = null" in sql
+    assert "failed_at_stage = null" in sql
+    assert "where meeting.id = candidate.id" in sql
+    assert isinstance(params, dict)
+    assert params["meeting_id"] == meeting.id
+    assert params["overview"] == "Meeting overview"
+    assert params["decisions"].obj == [{"text": "Ship it"}]
+    assert params["action_items"].obj == [
         {"task": "Send notes", "owner": {"kind": "speaker", "value": "SPEAKER_00"}},
         {"task": "Publish recap", "owner": {"kind": "unknown"}},
     ]
-    assert upsert_params["open_questions"].obj == [{"text": "Who owns rollout?"}]
-    update_sql, update_params = statements[1]
-    assert "status = 'done'" in update_sql
-    assert "transcription_progress = 100" in update_sql
-    assert "error_kind = null" in update_sql
-    assert "error_message = null" in update_sql
-    assert "failed_at_stage = null" in update_sql
-    assert "where id = %(meeting_id)s and status = 'summarizing'" in update_sql
-    assert update_params == {"meeting_id": meeting.id}
+    assert params["open_questions"].obj == [{"text": "Who owns rollout?"}]
 
 
-def test_mark_summary_regeneration_succeeded_overwrites_existing_summary_and_marks_idle() -> None:
-    connection = RecordingConnection(row=None, rowcounts=[1, 1])
+def test_mark_summary_regeneration_succeeded_appends_summary_version_and_marks_idle() -> None:
+    connection = RecordingConnection(row=None, rowcount=1)
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
         id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -709,30 +713,32 @@ def test_mark_summary_regeneration_succeeded_overwrites_existing_summary_and_mar
     queue.mark_summary_regeneration_succeeded(meeting=meeting, summary=summary)
 
     statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
-    assert len(statements) == 2
-    summary_sql, summary_params = statements[0]
-    assert summary_sql.startswith("update summaries")
-    assert "insert into summaries" not in summary_sql
-    assert "where meeting_id = %(meeting_id)s" in summary_sql
-    assert isinstance(summary_params, dict)
-    assert summary_params["meeting_id"] == meeting.id
-    assert summary_params["overview"] == "Replacement overview"
-    assert summary_params["decisions"].obj == [{"text": "Replacement decision"}]
-    assert summary_params["action_items"].obj == [
+    assert len(statements) == 1
+    sql, params = statements[0]
+    assert sql.startswith("with candidate as")
+    assert "insert into summary_versions" in sql
+    assert "insert into summaries" not in sql
+    assert "update summaries" not in sql
+    assert "latest.version_number + 1" in sql
+    assert "'ai_revision'::summary_version_source as source" in sql
+    assert "source_summary_version_id" in sql
+    assert "latest_summary_version_id = version.id" in sql
+    assert "status = 'done'" in sql
+    assert "summary_regeneration_status = 'idle'" in sql
+    assert "summary_regeneration_processing_started_at = null" in sql
+    assert isinstance(params, dict)
+    assert params["meeting_id"] == meeting.id
+    assert params["overview"] == "Replacement overview"
+    assert params["decisions"].obj == [{"text": "Replacement decision"}]
+    assert params["action_items"].obj == [
         {"task": "Follow up", "owner": {"kind": "speaker", "value": "SPEAKER_00"}}
     ]
-    assert summary_params["open_questions"].obj == [
+    assert params["open_questions"].obj == [
         {"text": "Replacement question?"}
     ]
-    meeting_sql, meeting_params = statements[1]
-    assert meeting_sql == normalize_sql(MARK_SUMMARY_REGENERATION_SUCCEEDED_SQL)
-    assert "status = 'done'" in meeting_sql
-    assert "summary_regeneration_status = 'idle'" in meeting_sql
-    assert "summary_regeneration_processing_started_at = null" in meeting_sql
-    assert meeting_params == {"meeting_id": meeting.id}
 
 
-def test_mark_summary_regeneration_succeeded_marks_failed_when_summary_row_is_missing() -> None:
+def test_mark_summary_regeneration_succeeded_marks_failed_when_latest_summary_is_missing() -> None:
     connection = RecordingConnection(row=None, rowcounts=[0, 1])
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
@@ -756,7 +762,8 @@ def test_mark_summary_regeneration_succeeded_marks_failed_when_summary_row_is_mi
 
     statements = [(normalize_sql(sql), params) for sql, params in connection.executed_statements]
     assert len(statements) == 2
-    assert statements[0][0].startswith("update summaries")
+    assert statements[0][0].startswith("with candidate as")
+    assert "insert into summary_versions" in statements[0][0]
     assert statements[1] == (
         normalize_sql(MARK_SUMMARY_REGENERATION_FAILED_SQL),
         {"meeting_id": meeting.id},
@@ -788,6 +795,8 @@ def test_mark_summary_regeneration_failed_marks_failed_without_touching_summary(
     ]
     sql = statements[0][0]
     assert "update summaries" not in sql
+    assert "summary_versions" not in sql
+    assert "latest_summary_version_id" not in sql
     assert "status = 'done'" in sql
     assert "summary_regeneration_status = 'failed'" in sql
     assert "summary_regeneration_processing_started_at = null" in sql
@@ -824,7 +833,7 @@ def test_summary_regeneration_terminal_writes_tolerate_deleted_rows() -> None:
 
 
 def test_mark_summarization_succeeded_raises_when_final_status_update_misses() -> None:
-    connection = RecordingConnection(row=None, rowcounts=[1, 0])
+    connection = RecordingConnection(row=None, rowcount=0)
     queue = PostgresMeetingQueue(lambda: connection)
     meeting = QueuedMeeting(
         id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -1015,11 +1024,21 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
         )
         admin.execute(
             """
+            create type summary_version_source as enum (
+              'initial',
+              'ai_revision',
+              'reset'
+            )
+            """
+        )
+        admin.execute(
+            """
             create table meetings (
               id uuid primary key,
               status meeting_status not null,
               summary_regeneration_status summary_regeneration_status not null default 'idle',
               summary_regeneration_processing_started_at timestamptz,
+              latest_summary_version_id uuid,
               duration_seconds integer,
               resume_from_stage meeting_status,
               transcription_progress integer,
@@ -1047,15 +1066,36 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
         )
         admin.execute(
             """
-            create table summaries (
-              meeting_id uuid primary key references meetings(id) on delete cascade,
+            create table summary_versions (
+              id uuid primary key default (md5(random()::text || clock_timestamp()::text)::uuid),
+              meeting_id uuid not null references meetings(id) on delete cascade,
+              version_number integer not null,
+              source summary_version_source not null,
+              source_revision_request_id uuid,
+              source_summary_version_id uuid references summary_versions(id),
               overview text not null default '',
               decisions jsonb not null default '[]'::jsonb,
               action_items jsonb not null default '[]'::jsonb,
               open_questions jsonb not null default '[]'::jsonb,
               created_at timestamptz not null default now(),
-              updated_at timestamptz not null default now()
+              updated_at timestamptz not null default now(),
+              constraint summary_versions_version_number_positive_check check (version_number >= 1),
+              constraint summary_versions_reset_source_summary_check check (source <> 'reset' or source_summary_version_id is not null)
             )
+            """
+        )
+        admin.execute(
+            "create unique index summary_versions_meeting_version_unique on summary_versions (meeting_id, version_number)"
+        )
+        admin.execute(
+            "create unique index summary_versions_meeting_id_id_unique on summary_versions (meeting_id, id)"
+        )
+        admin.execute(
+            """
+            alter table meetings
+            add constraint meetings_latest_summary_version_same_meeting_fk
+            foreign key (id, latest_summary_version_id)
+            references summary_versions(meeting_id, id)
             """
         )
         admin.execute(
@@ -1257,9 +1297,19 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
         with connection_factory() as connection:
             summary_rows = connection.execute(
                 """
-                select overview, decisions, action_items, open_questions
-                from summaries
-                where meeting_id = %s
+                select
+                  summary.version_number,
+                  summary.source::text,
+                  summary.overview,
+                  summary.decisions,
+                  summary.action_items,
+                  summary.open_questions,
+                  meeting.latest_summary_version_id = summary.id as is_latest
+                from meetings as meeting
+                join summary_versions as summary
+                  on summary.meeting_id = meeting.id
+                where meeting.id = %s
+                order by summary.version_number
                 """,
                 [row_id],
             ).fetchall()
@@ -1270,6 +1320,8 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
 
         assert summary_rows == [
             (
+                1,
+                "initial",
                 "replacement overview",
                 [{"text": "replacement decision"}],
                 [
@@ -1279,9 +1331,74 @@ def test_real_postgres_diarization_queue_transitions_are_idempotent() -> None:
                     }
                 ],
                 [{"text": "Replacement question?"}],
+                True,
             )
         ]
         assert done_meeting_row == ("done", 100)
+
+        done_meeting = QueuedMeeting(
+            id=row_id,
+            status=MeetingStatus.DONE,
+            resume_from_stage=None,
+            transcription_progress=100,
+            error_kind=None,
+            error_message=None,
+            failed_at_stage=None,
+            summary_regeneration_status=SummaryRegenerationStatus.PROCESSING,
+        )
+        with connection_factory() as connection:
+            connection.execute(
+                """
+                update meetings
+                set summary_regeneration_status = 'processing',
+                    summary_regeneration_processing_started_at = now()
+                where id = %s
+                """,
+                [row_id],
+            )
+            connection.commit()
+
+        queue.mark_summary_regeneration_succeeded(
+            meeting=done_meeting,
+            summary=SummaryDraft(
+                overview="regenerated overview",
+                decisions=(SummaryDecisionDraft(text="regenerated decision"),),
+                action_items=(),
+                open_questions=(),
+            ),
+        )
+
+        with connection_factory() as connection:
+            regenerated_rows = connection.execute(
+                """
+                select
+                  summary.version_number,
+                  summary.source::text,
+                  summary.source_summary_version_id is not null as has_source_summary,
+                  summary.overview,
+                  meeting.latest_summary_version_id = summary.id as is_latest
+                from meetings as meeting
+                join summary_versions as summary
+                  on summary.meeting_id = meeting.id
+                where meeting.id = %s
+                order by summary.version_number
+                """,
+                [row_id],
+            ).fetchall()
+            regeneration_status_row = connection.execute(
+                """
+                select summary_regeneration_status, summary_regeneration_processing_started_at
+                from meetings
+                where id = %s
+                """,
+                [row_id],
+            ).fetchone()
+
+        assert regenerated_rows == [
+            (1, "initial", False, "replacement overview", False),
+            (2, "ai_revision", True, "regenerated overview", True),
+        ]
+        assert regeneration_status_row == ("idle", None)
     finally:
         with psycopg.connect(database_url, autocommit=True) as admin:
             admin.execute(f'drop schema if exists "{schema_name}" cascade')

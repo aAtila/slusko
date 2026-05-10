@@ -1,0 +1,588 @@
+{
+  "id": "b3a533cb-e57f-4ea7-9972-5c2326723b51",
+  "prevId": "88da77b1-fd11-49d7-9da8-4a4dc2d1438e",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.meetings": {
+      "name": "meetings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_filenames": {
+          "name": "source_filenames",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "language": {
+          "name": "language",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detected_language": {
+          "name": "detected_language",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "meeting_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "summary_regeneration_status": {
+          "name": "summary_regeneration_status",
+          "type": "summary_regeneration_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'idle'"
+        },
+        "summary_regeneration_processing_started_at": {
+          "name": "summary_regeneration_processing_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "latest_summary_version_id": {
+          "name": "latest_summary_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_kind": {
+          "name": "error_kind",
+          "type": "error_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_at_stage": {
+          "name": "failed_at_stage",
+          "type": "meeting_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resume_from_stage": {
+          "name": "resume_from_stage",
+          "type": "meeting_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transcription_progress": {
+          "name": "transcription_progress",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_seconds": {
+          "name": "duration_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "meetings_created_at_idx": {
+          "name": "meetings_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "meetings_queue_claim_idx": {
+          "name": "meetings_queue_claim_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"meetings\".\"status\" in ('pending', 'normalizing', 'transcribing', 'diarizing', 'summarizing')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "meetings_latest_summary_version_same_meeting_fk": {
+          "name": "meetings_latest_summary_version_same_meeting_fk",
+          "tableFrom": "meetings",
+          "tableTo": "summary_versions",
+          "columnsFrom": ["id", "latest_summary_version_id"],
+          "columnsTo": ["meeting_id", "id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "meetings_transcription_progress_range_check": {
+          "name": "meetings_transcription_progress_range_check",
+          "value": "\"meetings\".\"transcription_progress\" is null or (\"meetings\".\"transcription_progress\" >= 0 and \"meetings\".\"transcription_progress\" <= 100)"
+        },
+        "meetings_duration_seconds_non_negative_check": {
+          "name": "meetings_duration_seconds_non_negative_check",
+          "value": "\"meetings\".\"duration_seconds\" is null or \"meetings\".\"duration_seconds\" >= 0"
+        },
+        "meetings_source_filenames_non_empty_check": {
+          "name": "meetings_source_filenames_non_empty_check",
+          "value": "array_length(\"meetings\".\"source_filenames\", 1) >= 1"
+        },
+        "meetings_language_valid_check": {
+          "name": "meetings_language_valid_check",
+          "value": "\"meetings\".\"language\" is null or \"meetings\".\"language\" in ('sr', 'en')"
+        },
+        "meetings_detected_language_auto_only_check": {
+          "name": "meetings_detected_language_auto_only_check",
+          "value": "\"meetings\".\"detected_language\" is null or \"meetings\".\"language\" is null"
+        },
+        "meetings_detected_language_non_empty_check": {
+          "name": "meetings_detected_language_non_empty_check",
+          "value": "\"meetings\".\"detected_language\" is null or length(trim(\"meetings\".\"detected_language\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.speaker_mappings": {
+      "name": "speaker_mappings",
+      "schema": "",
+      "columns": {
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "speaker_label": {
+          "name": "speaker_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "speaker_mappings_meeting_id_meetings_id_fk": {
+          "name": "speaker_mappings_meeting_id_meetings_id_fk",
+          "tableFrom": "speaker_mappings",
+          "tableTo": "meetings",
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "speaker_mappings_pkey": {
+          "name": "speaker_mappings_pkey",
+          "columns": ["meeting_id", "speaker_label"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.summary_versions": {
+      "name": "summary_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "summary_version_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_revision_request_id": {
+          "name": "source_revision_request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_summary_version_id": {
+          "name": "source_summary_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "overview": {
+          "name": "overview",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "decisions": {
+          "name": "decisions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "action_items": {
+          "name": "action_items",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "open_questions": {
+          "name": "open_questions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "summary_versions_meeting_version_unique": {
+          "name": "summary_versions_meeting_version_unique",
+          "columns": [
+            {
+              "expression": "meeting_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "summary_versions_meeting_id_id_unique": {
+          "name": "summary_versions_meeting_id_id_unique",
+          "columns": [
+            {
+              "expression": "meeting_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "summary_versions_meeting_version_idx": {
+          "name": "summary_versions_meeting_version_idx",
+          "columns": [
+            {
+              "expression": "meeting_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version_number",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "summary_versions_meeting_id_meetings_id_fk": {
+          "name": "summary_versions_meeting_id_meetings_id_fk",
+          "tableFrom": "summary_versions",
+          "tableTo": "meetings",
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "summary_versions_source_summary_version_id_summary_versions_id_fk": {
+          "name": "summary_versions_source_summary_version_id_summary_versions_id_fk",
+          "tableFrom": "summary_versions",
+          "tableTo": "summary_versions",
+          "columnsFrom": ["source_summary_version_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "summary_versions_version_number_positive_check": {
+          "name": "summary_versions_version_number_positive_check",
+          "value": "\"summary_versions\".\"version_number\" >= 1"
+        },
+        "summary_versions_reset_source_summary_check": {
+          "name": "summary_versions_reset_source_summary_check",
+          "value": "\"summary_versions\".\"source\" <> 'reset' or \"summary_versions\".\"source_summary_version_id\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.transcript_segments": {
+      "name": "transcript_segments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_seconds": {
+          "name": "start_seconds",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_seconds": {
+          "name": "end_seconds",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "speaker_label": {
+          "name": "speaker_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "transcript_segments_meeting_start_idx": {
+          "name": "transcript_segments_meeting_start_idx",
+          "columns": [
+            {
+              "expression": "meeting_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "start_seconds",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "transcript_segments_meeting_id_meetings_id_fk": {
+          "name": "transcript_segments_meeting_id_meetings_id_fk",
+          "tableFrom": "transcript_segments",
+          "tableTo": "meetings",
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.error_kind": {
+      "name": "error_kind",
+      "schema": "public",
+      "values": [
+        "normalization_failed",
+        "transcription_failed",
+        "transcription_empty",
+        "diarization_failed",
+        "summarization_failed",
+        "config_missing",
+        "unknown"
+      ]
+    },
+    "public.meeting_status": {
+      "name": "meeting_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "normalizing",
+        "transcribing",
+        "diarizing",
+        "summarizing",
+        "done",
+        "error"
+      ]
+    },
+    "public.summary_regeneration_status": {
+      "name": "summary_regeneration_status",
+      "schema": "public",
+      "values": ["idle", "pending", "processing", "failed"]
+    },
+    "public.summary_version_source": {
+      "name": "summary_version_source",
+      "schema": "public",
+      "values": ["initial", "ai_revision", "reset"]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

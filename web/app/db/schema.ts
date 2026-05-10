@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -10,7 +11,10 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
+  type AnyPgColumn,
+  type PgTableExtraConfigValue,
 } from "drizzle-orm/pg-core";
 
 export const meetingStatus = pgEnum("meeting_status", [
@@ -40,6 +44,12 @@ export const errorKind = pgEnum("error_kind", [
   "unknown",
 ]);
 
+export const summaryVersionSource = pgEnum("summary_version_source", [
+  "initial",
+  "ai_revision",
+  "reset",
+]);
+
 export const meetings = pgTable(
   "meetings",
   {
@@ -59,6 +69,7 @@ export const meetings = pgTable(
       "summary_regeneration_processing_started_at",
       { withTimezone: true },
     ),
+    latestSummaryVersionId: uuid("latest_summary_version_id"),
     errorKind: errorKind("error_kind"),
     errorMessage: text("error_message"),
     failedAtStage: meetingStatus("failed_at_stage"),
@@ -72,7 +83,7 @@ export const meetings = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [
+  (table): PgTableExtraConfigValue[] => [
     check(
       "meetings_transcription_progress_range_check",
       sql`${table.transcriptionProgress} is null or (${table.transcriptionProgress} >= 0 and ${table.transcriptionProgress} <= 100)`,
@@ -103,6 +114,14 @@ export const meetings = pgTable(
       .where(
         sql`${table.status} in ('pending', 'normalizing', 'transcribing', 'diarizing', 'summarizing')`,
       ),
+    foreignKey({
+      columns: [table.id, table.latestSummaryVersionId],
+      foreignColumns: [
+        summaryVersions.meetingId as AnyPgColumn,
+        summaryVersions.id as AnyPgColumn,
+      ],
+      name: "meetings_latest_summary_version_same_meeting_fk",
+    }),
   ],
 );
 
@@ -147,30 +166,62 @@ export type SummaryOpenQuestion = {
   text: string;
 };
 
-export const summaries = pgTable("summaries", {
-  meetingId: uuid("meeting_id")
-    .primaryKey()
-    .references(() => meetings.id, { onDelete: "cascade" }),
-  overview: text("overview").notNull().default(""),
-  decisions: jsonb("decisions")
-    .$type<SummaryDecision[]>()
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  actionItems: jsonb("action_items")
-    .$type<SummaryActionItem[]>()
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  openQuestions: jsonb("open_questions")
-    .$type<SummaryOpenQuestion[]>()
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const summaryVersions = pgTable(
+  "summary_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references((): AnyPgColumn => meetings.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    source: summaryVersionSource("source").notNull(),
+    sourceRevisionRequestId: uuid("source_revision_request_id"),
+    sourceSummaryVersionId: uuid("source_summary_version_id").references(
+      (): AnyPgColumn => summaryVersions.id,
+    ),
+    overview: text("overview").notNull().default(""),
+    decisions: jsonb("decisions")
+      .$type<SummaryDecision[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    actionItems: jsonb("action_items")
+      .$type<SummaryActionItem[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    openQuestions: jsonb("open_questions")
+      .$type<SummaryOpenQuestion[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("summary_versions_meeting_version_unique").on(
+      table.meetingId,
+      table.versionNumber,
+    ),
+    uniqueIndex("summary_versions_meeting_id_id_unique").on(
+      table.meetingId,
+      table.id,
+    ),
+    index("summary_versions_meeting_version_idx").on(
+      table.meetingId,
+      table.versionNumber.desc(),
+    ),
+    check(
+      "summary_versions_version_number_positive_check",
+      sql`${table.versionNumber} >= 1`,
+    ),
+    check(
+      "summary_versions_reset_source_summary_check",
+      sql`${table.source} <> 'reset' or ${table.sourceSummaryVersionId} is not null`,
+    ),
+  ],
+);
 
 export const speakerMappings = pgTable(
   "speaker_mappings",
@@ -200,5 +251,7 @@ export type MeetingLanguage = RequestedMeetingLanguage | null;
 export type MeetingStatus = (typeof meetingStatus.enumValues)[number];
 export type SummaryRegenerationStatus =
   (typeof summaryRegenerationStatus.enumValues)[number];
+export type SummaryVersionSource =
+  (typeof summaryVersionSource.enumValues)[number];
 export type ErrorKind = (typeof errorKind.enumValues)[number];
 export type Meeting = typeof meetings.$inferSelect;

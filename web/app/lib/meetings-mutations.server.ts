@@ -2,7 +2,6 @@ import { and, sql as drizzleSql, eq } from "drizzle-orm";
 import {
   meetings,
   speakerMappings,
-  summaries,
   transcriptSegments,
   type ErrorKind,
   type MeetingStatus,
@@ -151,7 +150,7 @@ type MeetingSummaryRegenerationRow = {
   id: string;
   status: MeetingStatus;
   summaryRegenerationStatus: SummaryRegenerationStatus;
-  hasSummary: boolean;
+  latestSummaryVersionId: string | null;
 };
 
 type RegenerateSummaryOptions = {
@@ -448,7 +447,7 @@ function assertCanRegenerateSummary(meeting: MeetingSummaryRegenerationRow) {
     );
   }
 
-  if (!meeting.hasSummary) {
+  if (meeting.latestSummaryVersionId === null) {
     throw new MeetingMutationError(
       "Only meetings with an existing summary can regenerate summaries.",
       400,
@@ -631,10 +630,9 @@ async function findMeetingSummaryRegenerationById(
       id: meetings.id,
       status: meetings.status,
       summaryRegenerationStatus: meetings.summaryRegenerationStatus,
-      summaryMeetingId: summaries.meetingId,
+      latestSummaryVersionId: meetings.latestSummaryVersionId,
     })
     .from(meetings)
-    .leftJoin(summaries, eq(summaries.meetingId, meetings.id))
     .where(eq(meetings.id, meetingId))
     .limit(1);
 
@@ -646,7 +644,7 @@ async function findMeetingSummaryRegenerationById(
     id: row.id,
     status: row.status,
     summaryRegenerationStatus: row.summaryRegenerationStatus,
-    hasSummary: row.summaryMeetingId !== null,
+    latestSummaryVersionId: row.latestSummaryVersionId,
   };
 }
 
@@ -745,11 +743,7 @@ async function queueSummaryRegenerationById(
       where id = ${meetingId}
         and status = 'done'
         and summary_regeneration_status in ('idle', 'failed')
-        and exists (
-          select 1
-          from summaries
-          where summaries.meeting_id = meetings.id
-        )
+        and latest_summary_version_id is not null
       returning id
     `;
 
