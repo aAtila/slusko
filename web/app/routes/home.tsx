@@ -8,17 +8,16 @@ import {
   type FormEvent,
 } from "react";
 import { data, Link, useFetcher } from "react-router";
-import { Icon, type IconName } from "~/components/app-icons";
+import { Icon } from "~/components/app-icons";
 import { useAppShellChrome, type AppShellChrome } from "~/components/app-shell";
-import type { MeetingStatus } from "~/db/schema";
-import { formatMeetingLanguageLabel } from "~/lib/meeting-language";
 import {
-  formatDuration,
-  getMeetingFailurePresentation,
-  getMeetingStatusPresentation,
+  getMeetingListItemPresentation,
+  type MeetingListItemIconPresentation,
+} from "~/lib/meeting-list-presentation";
+import {
   shouldPollMeetings,
   type HomeMeetingListItem,
-  type MeetingStatusTone,
+  type MeetingStatusPresentation,
 } from "~/lib/meetings-list";
 import { formatRelativeTimeFromNow } from "~/lib/relative-time";
 import type { Route } from "./+types/home";
@@ -679,12 +678,7 @@ export function MeetingRow({
   index: number;
   meeting: HomeMeetingListItem;
 }) {
-  const failurePresentation = getMeetingFailurePresentation(meeting);
-  const languageLabel = formatMeetingLanguageLabel(meeting);
-  const durationLabel =
-    meeting.durationSeconds !== null
-      ? formatDuration(meeting.durationSeconds)
-      : "Pending";
+  const presentation = getMeetingListItemPresentation(meeting, index);
 
   return (
     <li>
@@ -693,14 +687,14 @@ export function MeetingRow({
         to={`/meetings/${meeting.id}`}
       >
         <div className="flex min-w-0 items-center gap-5">
-          <MeetingIcon status={meeting.status} index={index} />
+          <MeetingIcon presentation={presentation.icon} />
           <div className="min-w-0">
             <h2 className="text-ink truncate text-sm font-medium">
               {meeting.title}
             </h2>
-            {failurePresentation ? (
+            {presentation.failure ? (
               <p className="text-danger mt-1 line-clamp-2 text-xs leading-5">
-                {failurePresentation.message}
+                {presentation.failure.message}
               </p>
             ) : null}
           </div>
@@ -710,13 +704,10 @@ export function MeetingRow({
         </p>
         <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
           <Icon name="clock" className="size-4" />
-          <span>{durationLabel}</span>
+          <span>{presentation.durationLabel}</span>
         </p>
-        <p className="text-ink-muted text-sm">{languageLabel}</p>
-        <StatusBadge
-          progress={meeting.transcriptionProgress}
-          status={meeting.status}
-        />
+        <p className="text-ink-muted text-sm">{presentation.languageLabel}</p>
+        <StatusBadge presentation={presentation.statusBadge} />
       </Link>
     </li>
   );
@@ -729,12 +720,7 @@ export function MeetingCard({
   index: number;
   meeting: HomeMeetingListItem;
 }) {
-  const failurePresentation = getMeetingFailurePresentation(meeting);
-  const languageLabel = formatMeetingLanguageLabel(meeting);
-  const durationLabel =
-    meeting.durationSeconds !== null
-      ? formatDuration(meeting.durationSeconds)
-      : "Pending";
+  const presentation = getMeetingListItemPresentation(meeting, index);
 
   return (
     <li>
@@ -743,12 +729,12 @@ export function MeetingCard({
         to={`/meetings/${meeting.id}`}
       >
         <div className="flex items-start gap-4">
-          <MeetingIcon status={meeting.status} index={index} />
+          <MeetingIcon presentation={presentation.icon} />
           <div className="min-w-0 flex-1">
             <h2 className="text-ink text-sm font-medium">{meeting.title}</h2>
-            {failurePresentation ? (
+            {presentation.failure ? (
               <p className="text-danger mt-1 text-xs leading-5">
-                {failurePresentation.message}
+                {presentation.failure.message}
               </p>
             ) : null}
             <p className="text-ink-muted mt-2 text-sm">
@@ -760,14 +746,13 @@ export function MeetingCard({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <p className="text-ink-muted flex items-center gap-2 font-mono text-sm tabular-nums">
               <Icon name="clock" className="size-4" />
-              <span>{durationLabel}</span>
+              <span>{presentation.durationLabel}</span>
             </p>
-            <p className="text-ink-muted text-sm">{languageLabel}</p>
+            <p className="text-ink-muted text-sm">
+              {presentation.languageLabel}
+            </p>
           </div>
-          <StatusBadge
-            progress={meeting.transcriptionProgress}
-            status={meeting.status}
-          />
+          <StatusBadge presentation={presentation.statusBadge} />
         </div>
       </Link>
     </li>
@@ -775,48 +760,25 @@ export function MeetingCard({
 }
 
 function MeetingIcon({
-  index,
-  status,
+  presentation,
 }: {
-  index: number;
-  status: MeetingStatus;
+  presentation: MeetingListItemIconPresentation;
 }) {
-  const palette =
-    status === "error"
-      ? "bg-danger-soft text-danger"
-      : [
-          "bg-brand-soft text-brand",
-          "bg-accent-soft text-accent-deep",
-          "bg-warning-soft text-warning",
-          "bg-success-soft text-success",
-          "bg-[#e3dde9] text-[#5e4a73]",
-        ][index % 5];
-  const icons: IconName[] = ["users", "chart", "megaphone", "file", "users"];
-
   return (
     <span
-      className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${palette}`}
+      className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${presentation.palette}`}
     >
-      <Icon
-        name={status === "error" ? "alert" : icons[index % icons.length]}
-        className="size-5"
-      />
+      <Icon name={presentation.name} className="size-5" />
     </span>
   );
 }
 
 function StatusBadge({
-  progress,
-  status,
+  presentation,
 }: {
-  progress: number | null;
-  status: MeetingStatus;
+  presentation: MeetingStatusPresentation;
 }) {
-  const presentation = getMeetingStatusPresentation({
-    status,
-    transcriptionProgress: progress,
-  });
-  const toneStyles: Record<MeetingStatusTone, string> = {
+  const toneStyles: Record<MeetingStatusPresentation["tone"], string> = {
     active: "border-brand/20 bg-brand-soft text-brand",
     danger: "border-danger/20 bg-danger-soft text-danger",
     queued: "border-hairline bg-surface-sunken text-ink-soft",
