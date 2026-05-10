@@ -932,11 +932,7 @@ export function SummaryPanel({
       : null);
 
   return (
-    <article
-      aria-labelledby="summary-panel-heading"
-      className="space-y-5"
-      id="overview"
-    >
+    <article aria-labelledby="summary-panel-heading" className="space-y-5">
       <header className="flex flex-wrap items-center gap-3">
         <h2
           className="font-display text-ink text-2xl font-medium tracking-tight"
@@ -992,7 +988,7 @@ export function SummaryPanel({
       ) : null}
 
       {summary === null ? (
-        <div className={cardClass}>
+        <div className={`${cardClass} scroll-mt-6`} id="overview">
           <EmptyState>{emptyMessage}</EmptyState>
         </div>
       ) : (
@@ -1200,7 +1196,11 @@ function SummaryOverview({
   }
 
   return (
-    <section aria-labelledby="summary-overview-heading" className={cardClass}>
+    <section
+      aria-labelledby="summary-overview-heading"
+      className={`${cardClass} scroll-mt-6`}
+      id="overview"
+    >
       <header className="flex items-center gap-3">
         <h3
           className="text-ink-muted font-mono text-[11px] font-medium tracking-[0.16em] uppercase"
