@@ -705,12 +705,14 @@ function MeetingExportMenu({ meetingId }: { meetingId: string }) {
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         aria-label="Open export options"
-        className="bg-brand text-canvas hover:bg-brand-deep inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition active:translate-y-px"
+        className="meeting-primary-button"
         onClick={() => setIsOpen((currentIsOpen) => !currentIsOpen)}
         ref={triggerRef}
         type="button"
       >
-        <Icon className="size-4" name="download" />
+        <span className="meeting-primary-button__icon">
+          <Icon className="size-5" name="download" />
+        </span>
         Export
       </button>
       {isOpen ? (
