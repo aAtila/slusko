@@ -115,9 +115,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     () => filterMeetings({ dateFilter, meetings, searchTerm, statusFilter }),
     [dateFilter, meetings, searchTerm, statusFilter],
   );
-  const completedMeetingsCount = meetings.filter(
-    (meeting) => meeting.status === "done",
-  ).length;
   const openUploadDialog = useCallback(() => {
     if (isUploading) {
       return;
@@ -236,19 +233,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         disabled: isUploading,
         onClick: openUploadDialog,
       },
-      storage: {
-        description: `${completedMeetingsCount} processed / ${meetings.length} meetings`,
-        percentage: 28,
-        percentageLabel: "28%",
-      },
     }),
-    [
-      completedMeetingsCount,
-      isUploading,
-      meetings.length,
-      openUploadDialog,
-      submitRecording,
-    ],
+    [isUploading, openUploadDialog, submitRecording],
   );
 
   useAppShellChrome(shellChrome);

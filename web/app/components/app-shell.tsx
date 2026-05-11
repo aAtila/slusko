@@ -27,12 +27,6 @@ export type AppShellPrimaryAction =
       to: string;
     };
 
-export type AppShellStorageSummary = {
-  description: string;
-  percentage: number;
-  percentageLabel: string;
-};
-
 export type AppShellDropZone = {
   onDragEnter: DragEventHandler<HTMLElement>;
   onDragLeave: DragEventHandler<HTMLElement>;
@@ -62,7 +56,6 @@ export type AppShellChrome = {
   dropZone?: AppShellDropZone;
   primaryAction?: AppShellPrimaryAction;
   sidebar?: AppShellSidebar;
-  storage?: AppShellStorageSummary;
 };
 
 type AppShellChromeContextValue = {
@@ -73,12 +66,6 @@ const defaultPrimaryAction: AppShellPrimaryAction = {
   kind: "link",
   label: "New Meeting",
   to: "/",
-};
-
-const defaultStorage: AppShellStorageSummary = {
-  description: "28.4 GB / 100 GB used",
-  percentage: 28,
-  percentageLabel: "28%",
 };
 
 const defaultSidebar: AppShellSidebar = { kind: "default" };
@@ -126,16 +113,15 @@ const AppShellChromeContext = createContext<AppShellChromeContextValue | null>(
   null,
 );
 
-const navItems: Array<
-  | { disabled?: false; icon: IconName; label: string; to: string }
-  | { disabled: true; icon: IconName; label: string }
-> = [
-  { icon: "home", label: "Home", to: "/" },
-  { icon: "calendar", label: "Meetings", to: "/#meetings-list" },
-  { icon: "search", label: "Search", to: "/#meetings-search" },
-  { disabled: true, icon: "users", label: "Speakers" },
-  { disabled: true, icon: "file", label: "Templates" },
-  { disabled: true, icon: "settings", label: "Settings" },
+const navItems: Array<{
+  icon: IconName;
+  label: string;
+  to: string;
+  tone?: SidebarTone;
+}> = [
+  { icon: "home", label: "Home", to: "/", tone: "brand" },
+  { icon: "calendar", label: "Meetings", to: "/#meetings-list", tone: "ink" },
+  { icon: "search", label: "Search", to: "/#meetings-search", tone: "ink" },
 ];
 
 export function AppShell() {
@@ -153,9 +139,6 @@ export function AppShell() {
     ? meetingDetailSidebar
     : defaultSidebar;
   const sidebar = chromeOverride?.sidebar ?? routeSidebar;
-  const storage = chromeOverride?.storage ?? defaultStorage;
-  const desktopInsetClass =
-    sidebar.kind === "sections" ? "lg:pl-[180px]" : "lg:pl-[258px]";
 
   return (
     <AppShellChromeContext.Provider value={contextValue}>
@@ -166,12 +149,8 @@ export function AppShell() {
         onDragOver={dropZone?.onDragOver}
         onDrop={dropZone?.onDrop}
       >
-        <DesktopSidebar
-          primaryAction={primaryAction}
-          sidebar={sidebar}
-          storage={storage}
-        />
-        <div className={`flex min-w-0 flex-col ${desktopInsetClass}`}>
+        <DesktopSidebar sidebar={sidebar} />
+        <div className="flex min-w-0 flex-col lg:pl-[180px]">
           <MobileHeader primaryAction={primaryAction} />
           <Outlet />
         </div>
@@ -195,33 +174,62 @@ export function useAppShellChrome(chrome: AppShellChrome) {
 }
 
 export function DesktopSidebar({
-  primaryAction,
   sidebar = defaultSidebar,
-  storage,
 }: {
-  primaryAction: AppShellPrimaryAction;
   sidebar?: AppShellSidebar;
-  storage: AppShellStorageSummary;
 }) {
   if (sidebar.kind === "sections") {
     return <SectionSidebar sidebar={sidebar} />;
   }
 
+  return <DefaultSidebar />;
+}
+
+function DefaultSidebar() {
+  const location = useLocation();
+
   return (
-    <aside className="border-hairline bg-canvas hidden w-[258px] border-r px-6 py-8 lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
+    <aside className="border-hairline bg-surface hidden w-[180px] border-r lg:fixed lg:top-0 lg:left-0 lg:flex lg:h-screen lg:flex-col">
       <Link
-        className="text-ink flex items-center gap-3 text-lg font-medium tracking-tight"
+        aria-label="Sluško home"
+        className="border-hairline flex h-24 items-center justify-center border-b"
         to="/"
       >
         <LogoMark />
-        <span className="font-display text-[1.35rem] tracking-tight">
-          Sluško
-        </span>
       </Link>
-      <PrimaryAction action={primaryAction} className="mt-10 h-12 gap-3" />
-      <SidebarNav />
-      <div className="mt-auto">
-        <StorageCard storage={storage} />
+      <nav
+        aria-label="Main navigation"
+        className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-5 text-xs font-medium"
+      >
+        {navItems.map((item) => {
+          const isActive =
+            item.label === "Home"
+              ? location.pathname === "/" && !location.hash
+              : item.label === "Meetings"
+                ? location.pathname.startsWith("/meetings") ||
+                  location.hash === "#meetings-list"
+                : location.hash === "#meetings-search";
+          const tone = item.tone ?? "brand";
+          const activeClass = SIDEBAR_TONE_ACTIVE_CLASS[tone];
+
+          return (
+            <Link
+              aria-current={isActive ? "page" : undefined}
+              className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl px-2 py-3 text-center transition ${
+                isActive
+                  ? activeClass
+                  : "text-ink-muted hover:bg-surface-sunken/70 hover:text-ink-soft"
+              }`}
+              key={item.label}
+              to={item.to}
+            >
+              <Icon className="size-5" name={item.icon} />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+      <div className="mt-auto px-3 pb-5">
         <UserCard />
       </div>
     </aside>
@@ -371,53 +379,6 @@ function MobileHeader({
   );
 }
 
-function SidebarNav() {
-  const location = useLocation();
-
-  return (
-    <nav className="text-ink mt-9 space-y-1 text-sm font-medium">
-      {navItems.map((item) => {
-        const isActive =
-          item.label === "Home"
-            ? location.pathname === "/"
-            : item.label === "Meetings"
-              ? location.pathname.startsWith("/meetings")
-              : false;
-
-        if (item.disabled) {
-          return (
-            <div
-              className="text-ink-subtle flex items-center gap-3 rounded-lg px-3 py-2.5"
-              key={item.label}
-            >
-              <Icon name={item.icon} className="size-5" />
-              {item.label}
-            </div>
-          );
-        }
-
-        return (
-          <Link
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition ${
-              isActive
-                ? "bg-brand-soft text-brand"
-                : "text-ink-soft hover:bg-surface-sunken/60"
-            }`}
-            key={item.label}
-            to={item.to}
-          >
-            <Icon
-              name={item.icon}
-              className={`size-5 ${isActive ? "" : "text-ink-muted"}`}
-            />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
 function PrimaryAction({
   action,
   className = "",
@@ -455,40 +416,17 @@ function PrimaryAction({
   );
 }
 
-function StorageCard({ storage }: { storage: AppShellStorageSummary }) {
-  const clampedPercentage = Math.max(0, Math.min(100, storage.percentage));
-
-  return (
-    <div className="border-hairline bg-surface/60 rounded-xl border p-4">
-      <div className="text-ink flex items-center justify-between text-sm font-medium">
-        <span>Storage</span>
-        <span className="text-ink-muted font-mono text-xs tabular-nums">
-          {storage.percentageLabel}
-        </span>
-      </div>
-      <p className="text-ink-muted mt-2 text-xs">{storage.description}</p>
-      <div className="bg-hairline mt-4 h-[3px] overflow-hidden rounded-full">
-        <div
-          className="bg-brand h-full rounded-full"
-          style={{ width: `${clampedPercentage}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 function UserCard() {
   return (
-    <div className="border-hairline -mx-6 mt-6 border-t px-6 pt-6">
+    <div className="border-hairline rounded-xl border p-3 opacity-50 grayscale">
       <div className="flex items-center gap-3">
-        <div className="bg-brand-soft text-brand flex size-10 items-center justify-center rounded-full text-sm font-medium">
+        <div className="bg-surface-sunken text-ink-muted flex size-9 items-center justify-center rounded-full text-xs font-medium">
           AA
         </div>
-        <div className="min-w-0">
-          <p className="text-ink truncate text-sm font-medium">Atila</p>
-          <p className="text-ink-muted text-xs">Admin</p>
+        <div className="min-w-0 flex-1">
+          <p className="text-ink-muted truncate text-xs font-medium">Atila</p>
+          <p className="text-ink-subtle text-[10px]">Admin</p>
         </div>
-        <Icon name="chevron-down" className="text-ink-muted ml-auto size-4" />
       </div>
     </div>
   );

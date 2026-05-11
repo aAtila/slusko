@@ -34,15 +34,7 @@ describe("DesktopSidebar", () => {
   test("renders compact meeting section navigation instead of the global app sidebar", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
-        <DesktopSidebar
-          primaryAction={{ kind: "link", label: "New Meeting", to: "/" }}
-          sidebar={sectionSidebar}
-          storage={{
-            description: "2 processed / 3 meetings",
-            percentage: 66,
-            percentageLabel: "66%",
-          }}
-        />
+        <DesktopSidebar sidebar={sectionSidebar} />
       </MemoryRouter>,
     );
 
@@ -53,7 +45,6 @@ describe("DesktopSidebar", () => {
     expect(markup).toContain('aria-current="location"');
     expect(markup).toContain("Transcript");
     expect(markup).not.toContain("New Meeting");
-    expect(markup).not.toContain("2 processed / 3 meetings");
   });
 
   test("renders a flat list of summary anchor items in the meeting section navigation", () => {
@@ -79,5 +70,20 @@ describe("DesktopSidebar", () => {
     expect(markup).not.toContain("#key-moments");
     expect(markup).not.toContain("#export");
     expect(markup).not.toContain(">Export</span>");
+  });
+
+  test("default sidebar renders logo-only header and functional nav items", () => {
+    const markup = renderAppShellAt("/");
+
+    expect(markup).toContain('aria-label="Sluško home"');
+    expect(markup).toContain('aria-label="Main navigation"');
+    expect(markup).toContain("Home");
+    expect(markup).toContain("Meetings");
+    expect(markup).toContain("Search");
+    expect(markup).not.toContain("Speakers");
+    expect(markup).not.toContain("Templates");
+    expect(markup).not.toContain("Settings");
+    expect(markup).not.toContain("Storage");
+    expect(markup).toContain("Atila");
   });
 });
