@@ -1461,10 +1461,19 @@ export function ProcessingPanel({
     actionData?.ok === false && actionData.intent === "retry-meeting"
       ? actionData.error
       : null;
-
   return (
-    <aside className={railCardClass} id="processing">
-      <header className="flex items-center justify-between gap-3">
+    <aside
+      className={`${railCardClass} bg-surface/65 relative overflow-hidden`}
+      id="processing"
+    >
+      <img
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none absolute right-[-3.25rem] bottom-[-3.25rem] z-0 hidden w-56 opacity-70 select-none sm:block"
+        draggable={false}
+        src="/brand/sava-processing-listening.png"
+      />
+      <header className="relative z-10 flex items-center justify-between gap-3">
         <h2 className="font-display text-ink text-lg font-medium tracking-tight">
           Processing
         </h2>
@@ -1482,7 +1491,7 @@ export function ProcessingPanel({
           </span>
         ) : null}
       </header>
-      <ol className="before:bg-hairline relative mt-5 space-y-4 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px">
+      <ol className="before:bg-hairline relative z-10 mt-5 space-y-4 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px sm:pr-24">
         {PIPELINE_STAGES.map((stage, index) => {
           const state = stageState(index);
 
@@ -1518,7 +1527,7 @@ export function ProcessingPanel({
       </ol>
       {failurePresentation?.isRetryable && meeting ? (
         <Form
-          className="border-hairline mt-5 border-t pt-5"
+          className="border-hairline relative z-10 mt-5 border-t pt-5"
           method="post"
           preventScrollReset
         >

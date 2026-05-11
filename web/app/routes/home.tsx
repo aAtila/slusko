@@ -440,32 +440,43 @@ export function UploadPanel({
   onBrowseFiles: () => void;
 }) {
   return (
-    <div
-      className={`mt-8 rounded-2xl border border-dashed px-5 py-10 text-center transition sm:px-8 sm:py-12 ${
-        isDraggingRecording
-          ? "border-brand bg-brand-soft"
-          : "border-hairline-strong bg-surface"
-      }`}
-    >
-      <div className="bg-brand-soft text-brand mx-auto flex size-14 items-center justify-center rounded-2xl">
-        <Icon name="upload-cloud" className="size-7" />
-      </div>
-      <h2 className="text-ink mt-5 text-lg font-medium">
-        Drop audio or video files here
-      </h2>
-      <p className="text-ink-muted mt-2 text-sm leading-6">
-        Supports MP3, WAV, M4A, MP4 and more. Dropped files use Serbian by
-        default; browse to choose English or Auto-detect.
-      </p>
-      <button
-        className="border-hairline bg-surface-elevated text-ink hover:border-brand/40 mt-4 inline-flex h-12 items-center justify-center gap-2 rounded-lg border px-6 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isUploading}
-        onClick={onBrowseFiles}
-        type="button"
+    <div className="mt-8">
+      <div
+        className={`relative overflow-hidden rounded-2xl border border-dashed px-5 py-10 text-center shadow-[0_1px_0_rgba(28,27,24,0.04),0_18px_40px_-28px_rgba(28,27,24,0.16)] transition sm:px-8 sm:py-12 md:text-left ${
+          isDraggingRecording
+            ? "border-brand bg-brand-soft/70"
+            : "border-hairline-strong bg-surface/65"
+        }`}
       >
-        <Icon name="folder" className="text-ink-muted size-5" />
-        {isUploading ? "Uploading..." : "Browse files"}
-      </button>
+        <img
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 right-0 z-0 hidden w-80 max-w-[42%] -translate-y-1/2 opacity-70 select-none md:block lg:right-6 lg:w-96"
+          draggable={false}
+          src="/brand/sava-meetings-homepage.png"
+        />
+        <div className="relative z-10 max-w-lg">
+          <div className="bg-brand-soft text-brand mx-auto flex size-14 items-center justify-center rounded-2xl md:mx-0">
+            <Icon name="upload-cloud" className="size-7" />
+          </div>
+          <h2 className="text-ink mt-5 text-lg font-medium">
+            Drop audio or video files here
+          </h2>
+          <p className="text-ink-muted mt-2 text-sm leading-6">
+            Supports MP3, WAV, M4A, MP4 and more. Dropped files use Serbian by
+            default; browse to choose English or Auto-detect.
+          </p>
+          <button
+            className="border-hairline bg-surface-elevated text-ink hover:border-brand/40 mt-4 inline-flex h-12 items-center justify-center gap-2 rounded-lg border px-6 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isUploading}
+            onClick={onBrowseFiles}
+            type="button"
+          >
+            <Icon name="folder" className="text-ink-muted size-5" />
+            {isUploading ? "Uploading..." : "Browse files"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -593,6 +593,25 @@ describe("SummaryPanel", () => {
     expect(markup).not.toContain("Extracting key moments");
   });
 
+  test("places listening Sava behind the processing card", () => {
+    const pendingMarkup = renderProcessingPanel({ status: "pending" });
+    const transcribingMarkup = renderProcessingPanel({
+      progress: 45,
+      status: "transcribing",
+    });
+    const doneMarkup = renderProcessingPanel({ status: "done" });
+    const errorMarkup = renderProcessingPanel({ status: "error" });
+
+    expect(pendingMarkup).toContain("/brand/sava-processing-listening.png");
+    expect(pendingMarkup).toContain("bg-surface/65");
+    expect(pendingMarkup).toContain("absolute right-[-3.25rem]");
+    expect(transcribingMarkup).toContain(
+      "/brand/sava-processing-listening.png",
+    );
+    expect(doneMarkup).toContain("/brand/sava-processing-listening.png");
+    expect(errorMarkup).toContain("/brand/sava-processing-listening.png");
+  });
+
   test("renders regeneration notices without replacing the saved summary", () => {
     const successMarkup = renderSummaryPanel({
       regenerationNotice: { message: "Summary regenerated.", tone: "success" },
