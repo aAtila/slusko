@@ -1336,7 +1336,7 @@ export function TranscriptPanel({
       {segments.length === 0 ? (
         <EmptyState>{emptyMessage}</EmptyState>
       ) : (
-        <ol className="mt-6 max-h-[40rem] space-y-6 overflow-y-auto pr-1">
+        <ol className="mt-6 max-h-[40rem] space-y-6 overflow-y-auto overscroll-contain pr-1">
           {segments.map((segment) => {
             const speakerName = applySpeakerMap(
               segment.speakerLabel,
