@@ -82,12 +82,6 @@ const meetingDetailSidebar: AppShellSidebar = {
       tone: "brand",
     },
     {
-      icon: "folder",
-      label: "Key topics",
-      to: "#summary-key-topics",
-      tone: "ink",
-    },
-    {
       icon: "check",
       label: "Action items",
       to: "#summary-action-items",

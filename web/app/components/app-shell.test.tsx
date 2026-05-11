@@ -54,13 +54,11 @@ describe("DesktopSidebar", () => {
 
     expect(markup).toContain('aria-label="Meeting sections"');
     expect(markup).toContain("#overview");
-    expect(markup).toContain("#summary-key-topics");
     expect(markup).toContain("#summary-action-items");
     expect(markup).toContain("#summary-decisions");
     expect(markup).toContain("#summary-open-questions");
     expect(markup).toContain("#transcript");
     expect(markup).toContain("Summary");
-    expect(markup).toContain("Key topics");
     expect(markup).toContain("Action items");
     expect(markup).toContain("Decisions");
     expect(markup).toContain("Questions");

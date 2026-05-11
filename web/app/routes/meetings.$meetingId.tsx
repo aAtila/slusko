@@ -920,7 +920,6 @@ export function SummaryPanel({
     emptyMessage = "Summary is not available for this meeting.";
   }
 
-  const keyTopics = getKeyTopics(summary, [], speakerMap);
   const canRegenerate = status === "done" && summary !== null;
   const isRegenerating =
     isRegenerateSubmitting || isActiveSummaryRegeneration(regenerationStatus);
@@ -994,7 +993,6 @@ export function SummaryPanel({
         <div className="space-y-5">
           <SummaryGlance
             counts={{
-              topics: keyTopics.length,
               decisions: summary.decisions.length,
               actions: summary.actionItems.length,
               questions: summary.openQuestions.length,
@@ -1003,23 +1001,6 @@ export function SummaryPanel({
 
           <SummaryOverview speakerMap={speakerMap} text={summary.overview} />
 
-          <SummarySection
-            emptyText="No key topics recorded."
-            items={keyTopics}
-            renderItem={(topic) => (
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <p className="text-ink-soft min-w-0 flex-1 text-[15px] leading-6">
-                  {topic.label}
-                </p>
-                {topic.timestamp ? (
-                  <time className="text-ink-muted shrink-0 font-mono text-[11px] tabular-nums">
-                    {topic.timestamp}
-                  </time>
-                ) : null}
-              </div>
-            )}
-            sectionId="topics"
-          />
           <SummarySection
             emptyText="No action items recorded."
             items={summary.actionItems}
@@ -1061,7 +1042,7 @@ export function SummaryPanel({
   );
 }
 
-type SummarySectionId = "topics" | "actions" | "decisions" | "questions";
+type SummarySectionId = "actions" | "decisions" | "questions";
 
 const SUMMARY_SECTION_META: Record<
   SummarySectionId,
@@ -1074,15 +1055,6 @@ const SUMMARY_SECTION_META: Record<
     shortLabel: string;
   }
 > = {
-  topics: {
-    anchor: "summary-key-topics",
-    chipClass:
-      "border-hairline text-ink hover:border-ink hover:bg-surface-elevated",
-    indexClass: "text-ink-muted",
-    label: "Key topics",
-    ruleClass: "bg-ink",
-    shortLabel: "Topics",
-  },
   decisions: {
     anchor: "summary-decisions",
     chipClass:
@@ -1113,7 +1085,6 @@ const SUMMARY_SECTION_META: Record<
 };
 
 const SUMMARY_GLANCE_ORDER: SummarySectionId[] = [
-  "topics",
   "decisions",
   "actions",
   "questions",
@@ -2026,12 +1997,6 @@ type SpeakerStat = {
   percentage: number;
 };
 
-type TopicItem = {
-  description?: string;
-  label: string;
-  timestamp: string;
-};
-
 const speakerAvatarClasses = [
   "bg-brand-soft text-brand",
   "bg-[#e3dde9] text-[#5e4a73]",
@@ -2087,54 +2052,6 @@ function compareSpeakerLabels(leftLabel: string, rightLabel: string) {
   }
 
   return leftLabel.localeCompare(rightLabel);
-}
-
-function getKeyTopics(
-  summary: MeetingSummary | null,
-  segments: TranscriptSegment[],
-  speakerMap: SpeakerMap = {},
-): TopicItem[] {
-  if (summary === null) {
-    return [];
-  }
-
-  const transcriptTimes = segments
-    .slice(0, 6)
-    .map((segment) => formatTranscriptTimestamp(segment.startSeconds));
-
-  const decisions = summary.decisions.slice(0, 3).map((decision, index) => {
-    const mappedText = applySpeakerMap(decision.text, speakerMap);
-
-    return {
-      description: mappedText,
-      label: summarizeTopicLabel(mappedText),
-      timestamp: transcriptTimes[index] ?? `${(index + 1) * 8}:10`,
-    };
-  });
-
-  if (decisions.length > 0) {
-    return decisions;
-  }
-
-  return summary.actionItems.slice(0, 3).map((item, index) => {
-    const mappedTask = applySpeakerMap(item.task, speakerMap);
-
-    return {
-      description: mappedTask,
-      label: summarizeTopicLabel(mappedTask),
-      timestamp: transcriptTimes[index] ?? `${(index + 1) * 8}:10`,
-    };
-  });
-}
-
-function summarizeTopicLabel(text: string) {
-  const normalizedText = text.trim().replace(/\s+/g, " ");
-
-  if (normalizedText.length <= 32) {
-    return normalizedText;
-  }
-
-  return `${normalizedText.slice(0, 29).trim()}...`;
 }
 
 function formatSpeakerLabel(label: string) {
