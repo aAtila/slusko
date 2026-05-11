@@ -389,14 +389,16 @@ function PrimaryAction({
   iconOnly?: boolean;
 }) {
   const sharedClassName = iconOnly
-    ? "inline-flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-canvas shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition hover:bg-brand-deep active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
-    : `inline-flex items-center justify-center rounded-lg bg-brand px-4 text-sm font-medium text-canvas shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition hover:bg-brand-deep active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 ${className}`;
+    ? "meeting-primary-button meeting-primary-button--icon-only shrink-0"
+    : `meeting-primary-button ${className}`;
   const label = action.ariaLabel ?? action.label;
 
   if (action.kind === "link") {
     return (
       <Link aria-label={label} className={sharedClassName} to={action.to}>
-        <Icon name="plus" className="size-5" />
+        <span className="meeting-primary-button__icon">
+          <Icon name="plus" className="size-5" />
+        </span>
         {iconOnly ? null : <span>{action.label}</span>}
       </Link>
     );
@@ -410,7 +412,9 @@ function PrimaryAction({
       onClick={action.onClick}
       type="button"
     >
-      <Icon name="plus" className="size-5" />
+      <span className="meeting-primary-button__icon">
+        <Icon name="plus" className="size-5" />
+      </span>
       {iconOnly ? null : <span>{action.label}</span>}
     </button>
   );

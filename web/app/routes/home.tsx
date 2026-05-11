@@ -261,12 +261,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </p>
         </div>
         <button
-          className="bg-brand text-canvas hover:bg-brand-deep hidden h-12 items-center justify-center gap-2 rounded-lg px-6 text-sm font-medium shadow-[0_10px_24px_-8px_rgba(63,90,48,0.45)] transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
+          className="meeting-primary-button hidden md:inline-flex"
           disabled={isUploading}
           onClick={openUploadDialog}
           type="button"
         >
-          <Icon name="plus" className="size-5" />
+          <span className="meeting-primary-button__icon">
+            <Icon name="plus" className="size-5" />
+          </span>
           {isUploading ? "Uploading..." : "New Meeting"}
         </button>
       </header>
