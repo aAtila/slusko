@@ -151,8 +151,13 @@ def test_openrouter_summarizer_posts_transcript_and_returns_validated_summary() 
     messages = payload["messages"]
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
-    assert "dominant transcript language" in messages[0]["content"]
-    assert "Serbian" in messages[0]["content"]
+    system_prompt = messages[0]["content"]
+    assert "dominant transcript language" in system_prompt
+    assert "Serbian" in system_prompt
+    assert "concrete follow-up tasks someone committed to doing after the meeting" in system_prompt
+    assert "exclude topics that were only mentioned as context" in system_prompt
+    assert '"<person\'s name>"' in system_prompt
+    assert '"owner": { "kind": "name", "value": "Atila" }' not in system_prompt
     assert "[00:00-00:04] SPEAKER_00: Atila will send the launch checklist." in messages[1]["content"]
     assert "[01:05-01:10] SPEAKER_01: Dogovorili smo demo u petak." in messages[1]["content"]
 

@@ -10,14 +10,14 @@ Each (prompt × transcript) pair is run `--runs` times to estimate variance.
 
 ## Why this exists
 
-The default `_system_prompt()` in `slusko_worker.pipeline.summarization`
-uses "Atila" as the canonical example value for a named action-item owner.
-That's a real hallucination vector — the model can latch onto a name it
-sees in its own system prompt and over-attribute work to that person even
-when the transcript never names them. The new prompt removes that example,
-adds explicit definitions of decision/action/open-question, and adds an
-anti-hallucination rule. This harness measures whether those changes
-actually move the needle.
+This harness was introduced after the original `_system_prompt()` in
+`slusko_worker.pipeline.summarization` used a real person name as the
+canonical example value for a named action-item owner. That was a real
+hallucination vector — the model could latch onto a name it saw in its own
+system prompt and over-attribute work to that person even when the transcript
+never named them. The prompt comparison keeps that failure mode covered while
+also measuring whether stricter definitions of decision/action/open-question
+improve summary quality.
 
 It also addresses the longstanding `docs/gotchas.md` TODO to "plan an
 evening to A/B Serbian summary quality" — the harness is structured so it
